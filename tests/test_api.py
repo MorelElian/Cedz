@@ -4,7 +4,7 @@ from collections import Counter
 
 import pytest
 
-from app import PROFILE_CATALOG, QUESTION_CATALOG, create_app
+from app import BINARY_SPLIT_LABELS, PROFILE_CATALOG, QUESTION_CATALOG, create_app
 
 
 @pytest.fixture()
@@ -381,35 +381,32 @@ def test_session_gets_three_rankings_with_required_lap_time(client):
     assert answers[str(question["instanceId"])]["lap_time"] == "12 min 30"
 
 
-def test_every_binary_split_has_labels_matching_its_question(client):
-    _, session_id = start_session(client)
-    questions = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
-    splits = [question for question in questions if question["type"] == "binary_split"]
-    assert len(splits) == 9
-    assert all(len(question["categoryLabels"]) == 2 for question in splits)
-    assert len({tuple(question["categoryLabels"]) for question in splits}) == len(splits)
+def test_every_binary_split_has_unique_labels_matching_its_question():
+    split_titles = {question[0] for question in QUESTION_CATALOG if question[2] == "binary_split"}
+    assert set(BINARY_SPLIT_LABELS) == split_titles
+    assert all(len(labels) == 2 for labels in BINARY_SPLIT_LABELS.values())
+    assert len(set(BINARY_SPLIT_LABELS.values())) == len(BINARY_SPLIT_LABELS)
 
 
-def test_session_gets_two_stable_variants_of_each_comparison(client):
+def test_session_comparison_sample_is_stable(client):
     _, session_id = start_session(client)
     first = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
     second = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
     first_ids = [question["instanceId"] for question in first if question["type"] == "compare_two"]
     second_ids = [question["instanceId"] for question in second if question["type"] == "compare_two"]
-    comparison_count = sum(question[2] == "compare_two" for question in QUESTION_CATALOG)
-    assert len(first_ids) == comparison_count * 2
     assert second_ids == first_ids
 
 
-def test_session_includes_every_question_and_limits_each_to_two_distinct_targets(client):
+def test_session_has_fifty_questions_and_limits_each_to_two_distinct_targets(client):
     _, session_id = start_session(client)
     first = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
     second = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
     grouped = {}
     for question in first:
         grouped.setdefault(question["questionId"], []).append(question)
-    assert len(grouped) == len(QUESTION_CATALOG)
+    assert len(first) == 50
     assert all(1 <= len(variants) <= 2 for variants in grouped.values())
+    assert len([question for question in first if question["type"] == "ranking"]) == 3
     for variants in grouped.values():
         target_sets = [tuple(question["targetParticipantIds"]) for question in variants]
         assert len(target_sets) == len(set(target_sets))

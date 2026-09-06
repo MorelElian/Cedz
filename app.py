@@ -39,6 +39,7 @@ QUESTION_TYPES = {
     "slider",
 }
 TARGET_MODES = {"none", "one_person", "two_people", "three_people", "all_people"}
+QUESTIONNAIRE_TARGET_SIZE = 50
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PHONE_RE = re.compile(r"^\+?[0-9][0-9 .()\-]{6,24}$")
 
@@ -730,6 +731,15 @@ def session_question_rows(session_id: str, participant_id: int) -> list[sqlite3.
             ).digest()
         )
         selected.extend(candidates[:2])
+    mandatory = [row for row in selected if row["type"] == "ranking"]
+    optional = [row for row in selected if row["type"] != "ranking"]
+    optional.sort(
+        key=lambda row: hashlib.sha256(
+            f"{session_id}:questionnaire:{row['id']}".encode()
+        ).digest()
+    )
+    optional_slots = max(0, QUESTIONNAIRE_TARGET_SIZE - len(mandatory))
+    selected = mandatory + optional[:optional_slots]
     return sorted(selected, key=lambda row: (row["display_order"], row["id"]))
 
 
