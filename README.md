@@ -40,7 +40,7 @@ jeu : une modification de la population changerait les sessions déjà ouvertes.
 
 Pour une question de comparaison à deux, le générateur crée un cycle aléatoire :
 chaque participant apparaît deux fois, sans produire toutes les combinaisons.
-Chaque répondant voit un tirage stable de 50 questions, dont les trois
+Chaque répondant voit un tirage stable de 30 questions, dont les trois
 classements obligatoires, avec au maximum deux variantes de chaque question
 ciblée. Les cibles des deux variantes sont différentes. Le choix est stable et
 pseudo-aléatoire parmi les questions qui ne concernent pas le répondant. Une

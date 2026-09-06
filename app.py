@@ -39,7 +39,7 @@ QUESTION_TYPES = {
     "slider",
 }
 TARGET_MODES = {"none", "one_person", "two_people", "three_people", "all_people"}
-QUESTIONNAIRE_TARGET_SIZE = 50
+QUESTIONNAIRE_TARGET_SIZE = 30
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PHONE_RE = re.compile(r"^\+?[0-9][0-9 .()\-]{6,24}$")
 

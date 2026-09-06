@@ -397,14 +397,14 @@ def test_session_comparison_sample_is_stable(client):
     assert second_ids == first_ids
 
 
-def test_session_has_fifty_questions_and_limits_each_to_two_distinct_targets(client):
+def test_session_has_thirty_questions_and_limits_each_to_two_distinct_targets(client):
     _, session_id = start_session(client)
     first = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
     second = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
     grouped = {}
     for question in first:
         grouped.setdefault(question["questionId"], []).append(question)
-    assert len(first) == 50
+    assert len(first) == 30
     assert all(1 <= len(variants) <= 2 for variants in grouped.values())
     assert len([question for question in first if question["type"] == "ranking"]) == 3
     for variants in grouped.values():
