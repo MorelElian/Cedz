@@ -103,7 +103,7 @@
   }
 
   function helpFor(type) {
-    return ({ranking:'Remets le groupe dans l’ordre.', binary_split:'Choisis un camp pour chaque personne.', slider:'Place le curseur.', compare_two:'Choisis ton favori.', compare_three:'Un seul choix.'})[type] || 'Fais au plus honnête.';
+    return ({ranking:'Remets le groupe dans l’ordre, puis donne ton temps par tour.', binary_split:'Choisis un camp pour chaque personne.', slider:'Place le curseur.', compare_two:'Choisis ton favori.', compare_three:'Un seul choix.'})[type] || 'Fais au plus honnête.';
   }
 
   function buildAnswer(question) {
@@ -147,6 +147,7 @@
   }
 
   function buildRanking(question, saved) {
+    const wrapper = document.createElement('div'); wrapper.className = 'ranking-answer';
     const people = [...candidatesOf(question)];
     const ordered = (saved?.ordered_participant_ids || saved?.orderedParticipantIds || []).map(String);
     if (ordered.length) people.sort((a,b) => ordered.indexOf(String(idOf(a))) - ordered.indexOf(String(idOf(b))));
@@ -160,7 +161,15 @@
       item.append(grip, name, actions); list.append(item);
     });
     bindRankingDrag(list);
-    return list;
+    const field = document.createElement('label'); field.className = 'field lap-time-field';
+    const label = document.createElement('span'); label.textContent = 'Temps par tour';
+    const input = document.createElement('input');
+    input.type = 'text'; input.name = 'lap_time'; input.required = true; input.maxLength = 100;
+    input.placeholder = 'Ex. 12 min 30'; input.autocomplete = 'off';
+    input.value = saved?.lap_time || saved?.lapTime || '';
+    field.append(label, input);
+    wrapper.append(list, field);
+    return wrapper;
   }
 
   function bindRankingDrag(list) {
@@ -195,7 +204,7 @@
   }
 
   function buildSplit(question, saved) {
-    const labels = question.category_labels || question.categories || ['Mental d’acier', 'Excuse en rodage'];
+    const labels = question.categoryLabels || ['Camp A', 'Camp B'];
     const a = new Set((saved?.category_a || []).map(String)), b = new Set((saved?.category_b || []).map(String));
     const board = document.createElement('div'); board.className = 'split-board';
     const zones = [
@@ -266,7 +275,7 @@
     const form = stage.querySelector('.question-card');
     const question = questions[index];
     if (!form) return null;
-    if (question.type === 'ranking') return {answer_json:{ordered_participant_ids:[...form.querySelectorAll('.ranking-item')].map(item=>item.dataset.id)}};
+    if (question.type === 'ranking') return {answer_json:{ordered_participant_ids:[...form.querySelectorAll('.ranking-item')].map(item=>item.dataset.id),lap_time:form.elements.lap_time?.value.trim() || ''}};
     if (question.type === 'binary_split') {
       const category_a=[...form.querySelectorAll('[data-category="a"] .split-person')].map(card => card.dataset.id);
       const category_b=[...form.querySelectorAll('[data-category="b"] .split-person')].map(card => card.dataset.id);
@@ -281,6 +290,7 @@
     const question=questions[index], answer=readAnswer(), error=stage.querySelector('.form-error'); let ok=true;
     if (question.type === 'compare_two' || question.type === 'compare_three') ok=Boolean(answer.answer_json.selected_participant_id);
     else if (question.type === 'binary_split') ok=answer.answer_json.category_a.length + answer.answer_json.category_b.length === candidatesOf(question).length;
+    else if (question.type === 'ranking') ok=Boolean(answer.answer_json.lap_time);
     else if (question.type !== 'ranking' && question.type !== 'slider') ok=Boolean(answer.answer_text);
     error.textContent='Il manque une réponse.'; error.hidden=ok; return ok;
   }
@@ -304,7 +314,7 @@
       if (question.type === 'compare_two' || question.type === 'compare_three') {
         answerValue = {selectedParticipantId: answerValue.selected_participant_id, comment: answerValue.comment};
       } else if (question.type === 'ranking') {
-        answerValue = {orderedParticipantIds: answerValue.ordered_participant_ids};
+        answerValue = {orderedParticipantIds: answerValue.ordered_participant_ids, lapTime: answerValue.lap_time};
       } else if (question.type === 'binary_split') {
         answerValue = {categoryA: answerValue.category_a, categoryB: answerValue.category_b};
       }

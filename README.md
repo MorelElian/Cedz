@@ -18,7 +18,7 @@ Ouvrir ensuite <http://127.0.0.1:5000>.
 - Mot de passe local initial : `t24-admin`
 - Base locale : `instance/t24.sqlite3`
 
-Au premier lancement, les dix profils illustrés et les 59 questions du catalogue
+Au premier lancement, les dix profils illustrés et les 61 questions du catalogue
 T24 sont créés. Tout est ensuite modifiable ou désactivable dans
 l'administration.
 Lors d'une mise à jour d'une ancienne base, les six questions de démonstration
@@ -40,8 +40,9 @@ jeu : une modification de la population changerait les sessions déjà ouvertes.
 
 Pour une question de comparaison à deux, le générateur crée un cycle aléatoire :
 chaque participant apparaît deux fois, sans produire toutes les combinaisons.
-Chaque répondant voit au maximum deux questions par catégorie. Si le même modèle
-est retenu deux fois, les cibles sont différentes. Le choix est stable et
+Chaque répondant voit toutes les questions du catalogue, avec au maximum deux
+variantes de chaque question ciblée. Les cibles des deux variantes sont
+différentes. Le choix est stable et
 pseudo-aléatoire parmi les questions qui ne concernent pas le répondant. Une
 régénération sans changement conserve le même tirage.
 

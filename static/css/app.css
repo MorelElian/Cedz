@@ -152,10 +152,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--mint); outline: 
 .range-value { font-family: Georgia, serif; color: var(--coral); font-size: 4rem; line-height: 1; }
 input[type="range"] { padding: 0; accent-color: var(--coral); box-shadow: none; }
 .range-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: .72rem; }
-.ranking-list { display: grid; gap: .55rem; padding: 0; list-style: none; counter-reset: rank; }
+.ranking-answer { display: grid; gap: 1.3rem; }
+.ranking-list { display: grid; gap: .55rem; padding: 0; margin: 0; list-style: none; counter-reset: rank; }
 .ranking-item { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: .8rem; padding: .75rem; background: white; border: 1px solid var(--line); border-radius: 10px; counter-increment: rank; cursor: grab; }
 .ranking-item::before { content: counter(rank); display: grid; place-items: center; width: 29px; height: 29px; color: white; background: var(--navy); border-radius: 50%; font-size: .72rem; font-weight: 900; }
 .ranking-item.is-dragging, .split-person.is-dragging { opacity: .42; cursor: grabbing; }
+.lap-time-field { max-width: 360px; padding: 1rem; background: rgba(255,255,255,.58); border: 1px solid var(--line); border-radius: 12px; }
 .drag-grip { color: var(--muted); font-weight: 900; letter-spacing: -.25rem; transform: rotate(90deg); }
 .rank-actions { display: flex; gap: .25rem; }
 .rank-actions button, .icon-button { display: grid; place-items: center; width: 34px; height: 34px; cursor: pointer; background: white; border: 1px solid var(--line); border-radius: 8px; }

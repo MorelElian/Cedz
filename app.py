@@ -42,6 +42,18 @@ TARGET_MODES = {"none", "one_person", "two_people", "three_people", "all_people"
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PHONE_RE = re.compile(r"^\+?[0-9][0-9 .()\-]{6,24}$")
 
+BINARY_SPLIT_LABELS = {
+    "Physique ou chance": ("Physique", "Chance"),
+    "Se révéler ou craquer": ("Peut se révéler", "Peut craquer"),
+    "Mental ou force": ("Gros mental", "Grosse force physique"),
+    "Silence ou larmes": ("Souffre en silence", "Va chialer"),
+    "Après minuit": ("Meilleur de nuit", "Négocie avec son âme"),
+    "Gestion du chaos": ("Va gérer", "Ne va pas gérer"),
+    "Moteurs ou diesels": ("Motive les autres", "À motiver"),
+    "Sourire final": ("Finit avec le sourire", "Sourit pour les photos"),
+    "Zug ou Bellagio": ("Se la met à Zug", "Chille à Bellagio"),
+}
+
 PROFILE_CATALOG = [
     ("Barbs", "barbsBig.png", "BarbsSmall.png"),
     ("Diego", "DiegoBig.png", "DiegoSmall.png"),
@@ -56,7 +68,9 @@ PROFILE_CATALOG = [
 ]
 
 QUESTION_CATALOG = [
-    ("Classement des disciplines", "Classe les participants pour les différentes disciplines du T24.", "ranking", "Classements", "all_people", None, None),
+    ("Classement nage", "Classe les participants pour la nage.", "ranking", "Classement · Nage", "all_people", None, None),
+    ("Classement vélo", "Classe les participants pour le vélo.", "ranking", "Classement · Vélo", "all_people", None, None),
+    ("Classement course", "Classe les participants pour la course.", "ranking", "Classement · Course", "all_people", None, None),
 
     ("Sport de prédilection", "Sur quel sport devrait se concentrer {person} ?", "free_text", "Sur quelqu'un", "one_person", None, None),
     ("Petit mot", "Un petit mot à adresser à {person}.", "free_text", "Sur quelqu'un", "one_person", None, None),
@@ -76,7 +90,7 @@ QUESTION_CATALOG = [
     ("Danger de la prépa", "Le plus gros danger dans la préparation de {person}, c'est…", "free_text", "Sur quelqu'un", "one_person", None, None),
     ("Phrase après victoire", "Si {person} réussit son T24, qu'est-ce qu'il nous dira ?", "free_text", "Sur quelqu'un", "one_person", None, None),
 
-    ("Comparaison de niveau", "Entre {person1} et {person2}, qui a le plus gros potentiel sportif ?", "compare_two", "Duels", "two_people", None, None),
+    ("Comparaison de niveau", "Si tu devais comparer le niveau de {person1} à celui de {person2}, tu penses qu'ils pourraient devenir qui ?", "free_text", "Duels", "two_people", None, None),
     ("Duel d'aura", "Entre {person1} et {person2}, qui a le plus de chances de finir le T24 avec une vraie aura ?", "compare_two", "Duels", "two_people", None, None),
     ("Décollage risqué", "Entre {person1} et {person2}, qui est le plus susceptible de partir comme un avion et de finir avec les ailes qui touchent la piste ?", "compare_two", "Duels", "two_people", None, None),
     ("Personne n'y croyait", "Entre {person1} et {person2}, qui a le plus gros potentiel de « personne n'y croyait, et pourtant » ?", "compare_two", "Duels", "two_people", None, None),
@@ -365,9 +379,25 @@ def seed_demo_data() -> None:
     catalog_version = db.execute(
         "SELECT value FROM site_settings WHERE key = 'question_catalog_version'"
     ).fetchone()
-    if not catalog_version or catalog_version["value"] != "1":
+    if not catalog_version or catalog_version["value"] != "3":
+        comparison_body = next(
+            body for title, body, *_ in QUESTION_CATALOG if title == "Comparaison de niveau"
+        )
         # Preserve old answers while retiring the six placeholders from the MVP.
         db.execute("UPDATE questions SET is_active = 0, updated_at = ? WHERE category = 'Démo'", (now,))
+        db.execute(
+            """UPDATE questions SET is_active = 0, updated_at = ?
+               WHERE title = 'Classement des disciplines'""",
+            (now,),
+        )
+        # The original Markdown expects a free comparison, not a forced choice
+        # between the two named people. Keep any historic answers on the retired row.
+        db.execute(
+            """UPDATE questions SET is_active = 0, updated_at = ?
+               WHERE title = 'Comparaison de niveau'
+                 AND (body != ? OR type != 'free_text')""",
+            (now, comparison_body),
+        )
         next_order = db.execute("SELECT COALESCE(MAX(display_order), 0) FROM questions").fetchone()[0]
         for offset, values in enumerate(QUESTION_CATALOG, 1):
             title, body, question_type, category, target_mode, scale_min, scale_max = values
@@ -394,7 +424,7 @@ def seed_demo_data() -> None:
                 ),
             )
         db.execute(
-            """INSERT INTO site_settings(key, value, updated_at) VALUES ('question_catalog_version', '1', ?)
+            """INSERT INTO site_settings(key, value, updated_at) VALUES ('question_catalog_version', '3', ?)
                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
             (now,),
         )
@@ -680,7 +710,7 @@ def get_answer_session(session_id: str) -> sqlite3.Row:
 
 def session_question_rows(session_id: str, participant_id: int) -> list[sqlite3.Row]:
     rows = _db().execute(
-        """SELECT qi.*, q.type, q.category, q.scale_min, q.scale_max, q.allow_self_target, q.display_order
+        """SELECT qi.*, q.title, q.type, q.category, q.scale_min, q.scale_max, q.allow_self_target, q.display_order
            FROM question_instances qi JOIN questions q ON q.id = qi.question_id
            WHERE qi.is_active = 1 AND q.is_active = 1
              AND (q.allow_self_target = 1 OR ? NOT IN (
@@ -690,14 +720,13 @@ def session_question_rows(session_id: str, participant_id: int) -> list[sqlite3.
         (participant_id,),
     ).fetchall()
     selected: list[sqlite3.Row] = []
-    variants: dict[str, list[sqlite3.Row]] = {}
+    variants: dict[int, list[sqlite3.Row]] = {}
     for row in rows:
-        category = row["category"] or f"question:{row['question_id']}"
-        variants.setdefault(category, []).append(row)
-    for category, candidates in variants.items():
+        variants.setdefault(row["question_id"], []).append(row)
+    for question_id, candidates in variants.items():
         candidates.sort(
             key=lambda row: hashlib.sha256(
-                f"{session_id}:{category}:{row['question_id']}:{row['id']}".encode()
+                f"{session_id}:{question_id}:{row['id']}".encode()
             ).digest()
         )
         selected.extend(candidates[:2])
@@ -835,8 +864,10 @@ def register_routes(app: Flask) -> None:
             targets = [row[key] for key in ("target_participant_id", "target_participant_2_id", "target_participant_3_id") if row[key] is not None]
             questions.append({
                 "instanceId": row["id"], "questionId": row["question_id"],
+                "title": row["title"],
                 "body": row["rendered_body"], "type": row["type"], "category": row["category"],
                 "targetParticipantIds": targets, "scaleMin": row["scale_min"], "scaleMax": row["scale_max"],
+                "categoryLabels": BINARY_SPLIT_LABELS.get(row["title"]),
             })
         allowed_instance_ids = {row["id"] for row in rows}
         saved_rows = _db().execute(
@@ -969,7 +1000,10 @@ def validate_answer(instance: sqlite3.Row, answer: Any, target_ids: list[int]) -
         ids = normalize_id_list(values)
         if set(ids) != active_ids or len(ids) != len(active_ids):
             abort_json(400, "Le classement doit contenir chaque participant actif une seule fois.")
-        return None, None, {"ordered_participant_ids": ids}
+        lap_time = str(answer.get("lapTime", answer.get("lap_time", ""))).strip()
+        if not lap_time or len(lap_time) > 100:
+            abort_json(400, "Le temps par tour doit contenir entre 1 et 100 caractères.")
+        return None, None, {"ordered_participant_ids": ids, "lap_time": lap_time}
     if question_type == "binary_split":
         first, second = normalize_id_list(answer.get("categoryA")), normalize_id_list(answer.get("categoryB"))
         if set(first) & set(second) or set(first + second) != active_ids or len(first + second) != len(active_ids):

@@ -69,7 +69,7 @@ def valid_answer(question, participant_ids):
     if question_type in {"compare_two", "compare_three"}:
         return {"selectedParticipantId": question["targetParticipantIds"][0], "comment": "Choix assumé."}
     if question_type == "ranking":
-        return {"orderedParticipantIds": participant_ids}
+        return {"orderedParticipantIds": participant_ids, "lapTime": "12 min 30"}
     if question_type == "binary_split":
         return {"categoryA": participant_ids[:2], "categoryB": participant_ids[2:]}
     raise AssertionError(f"Type non testé: {question_type}")
@@ -107,7 +107,9 @@ def test_participant_flow_does_not_expose_answers(client):
     assert client.post(f"/api/sessions/{session_id}/answers",
                        json={"questionInstanceId": question["instanceId"], "answer": "Tard"}).status_code == 200
     login_admin(client)
-    assert client.get("/api/admin/answers").get_json()["answers"][0]["answer"] == "Tard"
+    admin_answers = client.get("/api/admin/answers").get_json()["answers"]
+    updated = next(item for item in admin_answers if item["questionInstanceId"] == question["instanceId"])
+    assert updated["answer"] == "Tard"
 
 
 def test_participant_resumes_the_only_existing_session(client):
@@ -339,8 +341,9 @@ def test_catalog_is_preloaded_once_and_contains_every_markdown_question(client, 
     active = [question for question in first if question["isActive"]]
     assert len(active) == len(QUESTION_CATALOG)
     assert {question["category"] for question in active} == {
-        "Classements", "Sur quelqu'un", "Duels", "Comparaisons à trois",
-        "Réponses ouvertes", "Deux groupes", "Curseurs",
+        "Classement · Nage", "Classement · Vélo", "Classement · Course",
+        "Sur quelqu'un", "Duels", "Comparaisons à trois", "Réponses ouvertes",
+        "Deux groupes", "Curseurs",
     }
 
     create_app({
@@ -355,27 +358,58 @@ def test_catalog_is_preloaded_once_and_contains_every_markdown_question(client, 
     assert len(second) == len(first)
 
 
-def test_session_gets_at_most_two_stable_comparisons_per_category(client):
+def test_session_gets_three_rankings_with_required_lap_time(client):
+    _, session_id = start_session(client)
+    payload = client.get(f"/api/sessions/{session_id}/questions").get_json()
+    rankings = [question for question in payload["questions"] if question["type"] == "ranking"]
+    assert {question["category"] for question in rankings} == {
+        "Classement · Nage", "Classement · Vélo", "Classement · Course",
+    }
+    participant_ids = [participant["id"] for participant in payload["participants"]]
+    question = rankings[0]
+    without_time = client.post(f"/api/sessions/{session_id}/answers", json={
+        "questionInstanceId": question["instanceId"],
+        "answer": {"orderedParticipantIds": participant_ids},
+    })
+    assert without_time.status_code == 400
+    saved = client.post(f"/api/sessions/{session_id}/answers", json={
+        "questionInstanceId": question["instanceId"],
+        "answer": {"orderedParticipantIds": participant_ids, "lapTime": "12 min 30"},
+    })
+    assert saved.status_code == 200
+    answers = client.get(f"/api/sessions/{session_id}/questions").get_json()["answersByInstance"]
+    assert answers[str(question["instanceId"])]["lap_time"] == "12 min 30"
+
+
+def test_every_binary_split_has_labels_matching_its_question(client):
+    _, session_id = start_session(client)
+    questions = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
+    splits = [question for question in questions if question["type"] == "binary_split"]
+    assert len(splits) == 9
+    assert all(len(question["categoryLabels"]) == 2 for question in splits)
+    assert len({tuple(question["categoryLabels"]) for question in splits}) == len(splits)
+
+
+def test_session_gets_two_stable_variants_of_each_comparison(client):
     _, session_id = start_session(client)
     first = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
     second = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
     first_ids = [question["instanceId"] for question in first if question["type"] == "compare_two"]
     second_ids = [question["instanceId"] for question in second if question["type"] == "compare_two"]
-    assert len(first_ids) == 2
+    comparison_count = sum(question[2] == "compare_two" for question in QUESTION_CATALOG)
+    assert len(first_ids) == comparison_count * 2
     assert second_ids == first_ids
 
 
-def test_session_limits_every_category_and_keeps_same_question_targets_distinct(client):
+def test_session_includes_every_question_and_limits_each_to_two_distinct_targets(client):
     _, session_id = start_session(client)
     first = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
     second = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
     grouped = {}
-    by_category = {}
     for question in first:
         grouped.setdefault(question["questionId"], []).append(question)
-        by_category.setdefault(question["category"], []).append(question)
-    assert all(len(questions) <= 2 for questions in by_category.values())
-    assert all(len(variants) <= 2 for variants in grouped.values())
+    assert len(grouped) == len(QUESTION_CATALOG)
+    assert all(1 <= len(variants) <= 2 for variants in grouped.values())
     for variants in grouped.values():
         target_sets = [tuple(question["targetParticipantIds"]) for question in variants]
         assert len(target_sets) == len(set(target_sets))
