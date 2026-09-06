@@ -4,7 +4,7 @@ from collections import Counter
 
 import pytest
 
-from app import QUESTION_CATALOG, create_app
+from app import PROFILE_CATALOG, QUESTION_CATALOG, create_app
 
 
 @pytest.fixture()
@@ -136,6 +136,50 @@ def test_bundled_logo_is_used_on_a_clean_database(client):
     assert page.status_code == 200
     assert b'/logo.png' in page.data
     assert client.get('/logo.png').status_code == 200
+
+
+def test_ten_profiles_and_both_images_are_preloaded(client):
+    participants = client.get("/api/participants").get_json()["participants"]
+    assert [participant["displayName"] for participant in participants] == sorted(
+        profile[0] for profile in PROFILE_CATALOG
+    )
+    assert len(participants) == 10
+    for participant in participants:
+        assert participant["choicePhotoUrl"].startswith("/profile-images/")
+        assert participant["profilePhotoUrl"].startswith("/profile-images/")
+        assert participant["choicePhotoUrl"] != participant["profilePhotoUrl"]
+        assert client.get(participant["choicePhotoUrl"]).mimetype == "image/png"
+        assert client.get(participant["profilePhotoUrl"]).mimetype == "image/png"
+
+
+def test_legacy_placeholder_profiles_are_deleted_during_seed(tmp_path):
+    database = tmp_path / "legacy.sqlite3"
+    uploads = tmp_path / "uploads"
+    legacy_app = create_app({
+        "TESTING": True, "DATABASE": str(database), "UPLOAD_FOLDER": str(uploads),
+        "SECRET_KEY": "test-secret", "ADMIN_PASSWORD": "correct-horse", "SEED_DEMO": False,
+    })
+    with sqlite3.connect(database) as db:
+        for name, slug in (("Hugo", "hugo"), ("Léo", "l-o"), ("Max", "max"), ("Nico", "nico")):
+            db.execute(
+                """INSERT INTO participants(display_name, slug, is_active, created_at, updated_at)
+                   VALUES (?, ?, 1, 'now', 'now')""",
+                (name, slug),
+            )
+        db.commit()
+
+    migrated_app = create_app({
+        "TESTING": True, "DATABASE": str(database), "UPLOAD_FOLDER": str(uploads),
+        "SECRET_KEY": "test-secret", "ADMIN_PASSWORD": "correct-horse", "SEED_DEMO": True,
+    })
+    participants = migrated_app.test_client().get("/api/participants").get_json()["participants"]
+    assert {participant["displayName"] for participant in participants} == {
+        profile[0] for profile in PROFILE_CATALOG
+    }
+    with sqlite3.connect(database) as db:
+        assert db.execute(
+            "SELECT count(*) FROM participants WHERE display_name IN ('Hugo', 'Léo', 'Max', 'Nico')"
+        ).fetchone()[0] == 0
 
 
 def test_admin_uploads_two_participant_photos_and_logo(client):

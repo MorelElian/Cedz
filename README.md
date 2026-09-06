@@ -18,8 +18,9 @@ Ouvrir ensuite <http://127.0.0.1:5000>.
 - Mot de passe local initial : `t24-admin`
 - Base locale : `instance/t24.sqlite3`
 
-Au premier lancement, quatre participants et les 59 questions du catalogue T24
-sont créés. Tout est ensuite modifiable ou désactivable dans l'administration.
+Au premier lancement, les dix profils illustrés et les 59 questions du catalogue
+T24 sont créés. Tout est ensuite modifiable ou désactivable dans
+l'administration.
 Lors d'une mise à jour d'une ancienne base, les six questions de démonstration
 sont simplement désactivées afin de préserver les éventuelles réponses liées.
 

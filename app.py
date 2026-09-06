@@ -285,12 +285,81 @@ def seed_demo_data() -> None:
     db = _db()
     now = utcnow()
     changed = False
-    if not db.execute("SELECT 1 FROM participants LIMIT 1").fetchone():
-        for name in ("Hugo", "Léo", "Max", "Nico"):
+
+    profile_version = db.execute(
+        "SELECT value FROM site_settings WHERE key = 'profile_catalog_version'"
+    ).fetchone()
+    if not profile_version or profile_version["value"] != "3":
+        legacy_rows = db.execute(
+            """SELECT id FROM participants
+               WHERE slug IN ('hugo', 'leo', 'l-o', 'max', 'nico')
+                  OR display_name IN ('Hugo', 'Léo', 'Max', 'Nico')"""
+        ).fetchall()
+        legacy_ids = [row["id"] for row in legacy_rows]
+        if legacy_ids:
+            placeholders = ",".join("?" for _ in legacy_ids)
             db.execute(
-                "INSERT INTO participants(display_name, slug, is_active, created_at, updated_at) VALUES (?, ?, 1, ?, ?)",
-                (name, slugify(name), now, now),
+                f"""DELETE FROM answers
+                    WHERE author_participant_id IN ({placeholders})
+                       OR target_participant_id IN ({placeholders})
+                       OR session_id IN (
+                           SELECT id FROM answer_sessions
+                           WHERE participant_id IN ({placeholders})
+                       )
+                       OR question_instance_id IN (
+                           SELECT id FROM question_instances
+                           WHERE target_participant_id IN ({placeholders})
+                              OR target_participant_2_id IN ({placeholders})
+                              OR target_participant_3_id IN ({placeholders})
+                       )""",
+                legacy_ids * 6,
             )
+            db.execute(
+                f"DELETE FROM answer_sessions WHERE participant_id IN ({placeholders})",
+                legacy_ids,
+            )
+            db.execute(
+                f"""DELETE FROM question_instances
+                    WHERE target_participant_id IN ({placeholders})
+                       OR target_participant_2_id IN ({placeholders})
+                       OR target_participant_3_id IN ({placeholders})""",
+                legacy_ids * 3,
+            )
+            db.execute(
+                f"DELETE FROM participants WHERE id IN ({placeholders})",
+                legacy_ids,
+            )
+        for name, large_image, small_image in PROFILE_CATALOG:
+            slug = slugify(name)
+            large_url = f"/profile-images/{large_image}"
+            small_url = f"/profile-images/{small_image}"
+            existing = db.execute(
+                "SELECT id FROM participants WHERE slug = ? ORDER BY id LIMIT 1",
+                (slug,),
+            ).fetchone()
+            if existing:
+                db.execute(
+                    """UPDATE participants
+                       SET display_name = ?, avatar_url = ?, profile_photo_url = ?,
+                           is_active = 1, updated_at = ?
+                       WHERE id = ?""",
+                    (name, large_url, small_url, now, existing["id"]),
+                )
+                continue
+            db.execute(
+                """INSERT INTO participants(
+                       display_name, slug, avatar_url, profile_photo_url,
+                       is_active, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, 1, ?, ?)""",
+                (name, slug, large_url, small_url, now, now),
+            )
+        db.execute(
+            """INSERT INTO site_settings(key, value, updated_at)
+               VALUES ('profile_catalog_version', '3', ?)
+               ON CONFLICT(key) DO UPDATE
+               SET value = excluded.value, updated_at = excluded.updated_at""",
+            (now,),
+        )
         changed = True
 
     catalog_version = db.execute(
@@ -503,7 +572,12 @@ def validate_asset_url(value: Any) -> str | None:
     url = str(value or "").strip()
     if not url:
         return None
-    if len(url) > 1000 or not (url.startswith("/uploads/") or url.startswith("https://") or url.startswith("http://")):
+    if len(url) > 1000 or not (
+        url.startswith("/uploads/")
+        or url.startswith("/profile-images/")
+        or url.startswith("https://")
+        or url.startswith("http://")
+    ):
         abort_json(400, "URL d’image invalide.")
     return url
 
@@ -642,6 +716,10 @@ def register_routes(app: Flask) -> None:
     @app.get("/logo.png")
     def project_logo():
         return send_from_directory(Path(__file__).parent, "logo.png", max_age=86400)
+
+    @app.get("/profile-images/<path:filename>")
+    def profile_image(filename: str):
+        return send_from_directory(Path(__file__).with_name("images"), filename, max_age=86400)
 
     @app.get("/")
     def index():
