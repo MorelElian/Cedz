@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Cedz Are Shooting · Merci{% endblock %}
+{% block body_class %}page-thanks{% endblock %}
+{% block content %}
+<section class="confirmation-card">
+  <div class="confirmation-stamp" aria-hidden="true">BIEN<br>REÇU</div>
+  <h1>C'est dans <em>la boîte.</em></h1>
+  <p class="confirmation-lead">Tes réponses sont enregistrées et restent secrètes.</p>
+  <div class="confirmation-note">
+    <span aria-hidden="true">✦</span>
+    <p>Quand tout le monde aura terminé, tu recevras régulièrement des mails ou messages remplis de motivation pure.</p>
+  </div>
+  {% if session_id %}
+  <form class="feedback-form" data-feedback-form data-session-id="{{ session_id }}">
+    <label class="field" for="feedback-message"><span>Un mot pour l'admin ? <small>(facultatif)</small></span><textarea id="feedback-message" name="message" rows="4" maxlength="2000" placeholder="Une idée, une remarque…"></textarea></label>
+    <p class="form-error" role="alert" data-feedback-error hidden></p>
+    <p class="feedback-success" role="status" data-feedback-success hidden>Message envoyé. Merci !</p>
+    <button class="button button-secondary button-wide" type="submit">Envoyer mon message</button>
+  </form>
+  {% endif %}
+  <a class="button button-primary" href="/">Retour à l'accueil</a>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/thanks.js') }}" defer></script>{% endblock %}

@@ -1,0 +1,8 @@
+- Le titre doit être Cedz Are shooting, pas Avant de courir.... 
+- Il y aun logo que je fais te fournir, j'aimerais qu'il apparaise en overlay et puis en suite qu'il soit en haut a gaiche a la place de 24. 
+- J'aimerais qu'il y ait unsysteme d'upload pour les images, pour que je puisse te les glisser directement pour chacun des participantes 
+- Une seule participation par personne, possibilité de modifier ses réponses
+- Chaque personne a deux photos la premiere en gros quand il choissisent et la deuxieme en petit en haut pour quand ils sont déjà "connecté" dans le sens ils ont choisi le profil 
+- La phrase choisis ton profil et réponds doit être changé par: tu recevras des mails de temps en temps pour te rappeler a ton devoir. 
+- tu me cales des citations a la place de 24 heures Zero Sommeil, une par question (trouve les sur intenert, n'invente pas), le mieux est d'avoir des trucs percutant). 
+- Enfin la page de fin donne plus de détails: elle explique que une fois que tout le monde aura complété alors tu recevras mail / messages régulierement avec de la motivation pure, et aussi un espace pour un petit mot / suggestion pour l'admin,

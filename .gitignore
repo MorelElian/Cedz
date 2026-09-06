@@ -1,0 +1,12 @@
+.venv/
+.tools/
+output/playwright/
+.playwright-cli/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+instance/*.sqlite3
+instance/*.sqlite3-*
+instance/uploads/
+SFB-ak47_1.mp3
+cedz_weapons_overlay_alpha.webp

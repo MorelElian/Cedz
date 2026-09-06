@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Cedz Are Shooting · Connexion admin{% endblock %}
+{% block body_class %}page-login{% endblock %}
+{% block content %}
+<section class="login-card" aria-labelledby="login-title">
+  <div class="login-badge" aria-hidden="true">A</div>
+  <p class="eyebrow">Espace admin</p>
+  <h1 id="login-title">Connexion <em>admin</em></h1>
+  <form class="stack-form" method="post" action="/admin/login">
+    <label class="field">
+      <span>Mot de passe</span>
+      <input type="password" name="password" autocomplete="current-password" required autofocus>
+    </label>
+    {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+    <button class="button button-primary button-wide" type="submit">Se connecter <span aria-hidden="true">→</span></button>
+  </form>
+</section>
+{% endblock %}

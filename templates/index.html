@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Cedz Are Shooting{% endblock %}
+{% block body_class %}page-home{% endblock %}
+
+{% block header_actions %}
+  <span class="header-pill">Entre nous.</span>
+{% endblock %}
+
+{% block content %}
+{% if site_logo_url %}
+  <div class="intro-overlay" data-intro-overlay aria-hidden="true">
+    <div class="intro-stage intro-stage-logo" aria-hidden="true">
+      <img src="{{ site_logo_url }}" alt="">
+    </div>
+  </div>
+{% endif %}
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero-copy">
+    <p class="eyebrow">T24 · le questionnaire</p>
+    <h1 id="hero-title">Cedz Are <em>Shooting</em></h1>
+    <p class="hero-lead">Tu recevras des mails de temps en temps pour te rappeler à ton devoir.</p>
+  </div>
+  <aside class="hero-card" aria-label="Mode d'emploi">
+    <span class="hero-card-number">01</span>
+    <div><strong>Choisis ta tête</strong></div>
+    <span class="hero-card-number">02</span>
+    <div><strong>Réponds franchement</strong></div>
+    <span class="hero-card-number">03</span>
+    <div><strong>Fais comme si de rien n'était</strong></div>
+  </aside>
+</section>
+
+<section class="start-panel" aria-labelledby="start-title" data-start-app>
+  <div class="section-heading">
+    <div>
+      <h2 id="start-title">C'est qui, toi&nbsp;?</h2>
+    </div>
+  </div>
+
+  <form class="start-form" action="/api/sessions" method="post" data-session-form>
+    <fieldset class="participant-fieldset">
+      <legend class="sr-only">Choisir mon profil</legend>
+      <div class="participant-grid" data-participant-grid aria-live="polite" aria-busy="true">
+        {% if participants %}
+          {% for participant in participants %}
+            <label class="participant-card">
+              <input type="radio" name="participant_id" value="{{ participant.id }}" required>
+              <span class="participant-visual">
+                {% set choice_photo = participant.choice_photo_url or participant.choicePhotoUrl or participant.avatar_url %}
+                {% if choice_photo %}<img src="{{ choice_photo }}" alt="" loading="lazy">{% else %}<span class="avatar-fallback" aria-hidden="true">{{ participant.display_name[:2] | upper }}</span>{% endif %}
+              </span>
+              <span class="participant-name">{{ participant.display_name }}</span>
+              <span class="participant-select">C'est moi <span aria-hidden="true">→</span></span>
+            </label>
+          {% endfor %}
+        {% else %}
+          <div class="empty-state" data-participant-empty>
+            <span aria-hidden="true">🏁</span>
+            <strong>La ligne de départ est encore vide.</strong>
+            <p>L'admin doit ajouter les participants avant le coup d'envoi.</p>
+          </div>
+        {% endif %}
+      </div>
+    </fieldset>
+
+    <div class="identity-panel" data-identity-panel>
+      <div class="identity-copy">
+        <h3>Juste pour te reconnaître.</h3>
+        <p>Ton email permet de retrouver ta session.</p>
+      </div>
+      <div class="form-fields">
+        <label class="field">
+          <span>Adresse email</span>
+          <input type="email" name="email" autocomplete="email" placeholder="toi@exemple.fr" required>
+        </label>
+        <label class="field">
+          <span>Numéro de téléphone</span>
+          <input type="tel" name="phone" autocomplete="tel" inputmode="tel" placeholder="06 12 34 56 78">
+          <small>Facultatif</small>
+        </label>
+        <label class="field" data-secret-field hidden>
+          <span>Code secret</span>
+          <input type="text" name="secret_code" autocomplete="one-time-code" inputmode="numeric">
+        </label>
+        <p class="form-error" data-form-error role="alert" hidden></p>
+        <button class="button button-primary button-wide" type="submit" data-submit-session>
+          <span>C'est parti</span><span aria-hidden="true">→</span>
+        </button>
+      </div>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/home.js') }}" defer></script>{% endblock %}

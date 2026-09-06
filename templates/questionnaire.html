@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Cedz Are Shooting · Questionnaire{% endblock %}
+{% block body_class %}page-questionnaire{% endblock %}
+{% block header_actions %}
+  {% if current_participant %}
+    {% set profile_photo = current_participant.profile_photo_url or current_participant.profilePhotoUrl %}
+    {% set profile_name = current_participant.display_name or current_participant.displayName %}
+    <span class="profile-chip">
+      {% if profile_photo %}<img src="{{ profile_photo }}" alt="">{% else %}<span aria-hidden="true">{{ profile_name[:2] | upper }}</span>{% endif %}
+      <strong>{{ profile_name }}</strong>
+    </span>
+  {% endif %}
+  <span class="save-status" data-save-status aria-live="polite"><span class="status-dot"></span> Réponses sauvegardées</span>
+{% endblock %}
+
+{% block footer_quote %}
+  <figure class="question-quote">
+    <q data-question-quote>Il faut avoir de la persévérance, et surtout de la confiance en soi.</q>
+    <figcaption>— <a data-question-quote-source href="https://fr.wikiquote.org/wiki/Marie_Curie" target="_blank" rel="noopener noreferrer">Marie Curie</a></figcaption>
+  </figure>
+{% endblock %}
+
+{% block content %}
+<section class="questionnaire" data-questionnaire data-session-id="{{ session_id }}">
+  <header class="questionnaire-head">
+    <div>
+      <p class="eyebrow">Questionnaire</p>
+      <h1>À toi.</h1>
+    </div>
+    <div class="progress-copy"><strong data-progress-current>0</strong><span>/</span><span data-progress-total>0</span></div>
+  </header>
+  <div class="progress-track" role="progressbar" aria-label="Progression du questionnaire" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-progress-track><span data-progress-bar></span></div>
+
+  <div class="question-stage" data-question-stage aria-live="polite" aria-busy="true">
+    <div class="loading-state">
+      <span class="spinner" aria-hidden="true"></span>
+      <strong>Chargement…</strong>
+    </div>
+  </div>
+
+  <footer class="question-nav" hidden data-question-nav>
+    <button class="button button-secondary" type="button" data-previous><span aria-hidden="true">←</span> Précédente</button>
+    <span class="keyboard-hint"><kbd>Ctrl</kbd> + <kbd>Entrée</kbd></span>
+    <button class="button button-primary" type="button" data-next>Suivante <span aria-hidden="true">→</span></button>
+  </footer>
+</section>
+
+<template id="question-template">
+  <form class="question-card" novalidate>
+    <div class="question-meta"><span class="question-type"></span><span class="question-target"></span></div>
+    <h2 class="question-body"></h2>
+    <p class="question-help"></p>
+    <div class="answer-zone"></div>
+    <p class="form-error" role="alert" hidden></p>
+  </form>
+</template>
+
+<template id="error-template">
+  <div class="error-state">
+    <span aria-hidden="true">⚠</span><h2>Ça coince.</h2>
+    <p>Impossible de charger les questions.</p>
+    <button class="button button-secondary" type="button" data-retry>Réessayer</button>
+  </div>
+</template>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/questionnaire.js') }}" defer></script>{% endblock %}

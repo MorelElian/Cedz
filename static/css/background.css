@@ -1,0 +1,50 @@
+:root {
+  --page-bg: #f2f0e9;
+  --page-ink: #121a32;
+}
+
+body {
+  background-color: var(--page-bg);
+  background-image:
+    radial-gradient(circle at 9% 10%, rgba(252, 93, 61, .11) 0 2px, transparent 3px),
+    radial-gradient(circle at 91% 14%, rgba(28, 195, 164, .10) 0 3px, transparent 4px),
+    linear-gradient(115deg, transparent 0 48%, rgba(18, 26, 50, .025) 49% 50%, transparent 51% 100%);
+  background-size: 54px 54px, 82px 82px, 180px 180px;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 999px;
+  filter: blur(2px);
+}
+
+body::before {
+  width: 28rem;
+  height: 28rem;
+  top: -18rem;
+  right: -10rem;
+  background: rgba(255, 215, 94, .20);
+}
+
+body::after {
+  width: 25rem;
+  height: 25rem;
+  bottom: -18rem;
+  left: -14rem;
+  background: rgba(28, 195, 164, .12);
+}
+
+.page-questionnaire::before,
+.page-admin::before { background: rgba(118, 143, 255, .17); }
+
+@media (prefers-color-scheme: dark) {
+  /* Deliberately keep the game light: contrast and art direction stay predictable. */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before, body::after { filter: none; }
+}

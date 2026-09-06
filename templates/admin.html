@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Cedz Are Shooting · Quartier général{% endblock %}
+{% block body_class %}page-admin{% endblock %}
+{% block head %}<meta name="csrf-token" content="{{ csrf_token | default('', true) }}">{% endblock %}
+{% block header_actions %}
+  <form method="post" action="/admin/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token | default('', true) }}"><button class="button button-ghost button-small" type="submit">Déconnexion</button></form>
+{% endblock %}
+
+{% block content %}
+<section class="admin-shell" data-admin-app>
+  <header class="admin-heading">
+    <div><p class="eyebrow">Administration</p><h1>Tableau de bord</h1></div>
+    <button class="button button-primary" type="button" data-open-create>+ Ajouter</button>
+  </header>
+
+  <nav class="admin-tabs" aria-label="Sections d'administration" data-tabs>
+    <button type="button" aria-selected="true" data-tab="overview">Vue d'ensemble</button>
+    <button type="button" aria-selected="false" data-tab="participants">Participants</button>
+    <button type="button" aria-selected="false" data-tab="questions">Questions</button>
+    <button type="button" aria-selected="false" data-tab="answers">Réponses</button>
+    <button type="button" aria-selected="false" data-tab="feedback">Messages</button>
+  </nav>
+
+  <div class="admin-live" role="status" aria-live="polite" data-admin-status></div>
+
+  <section class="admin-panel" data-panel="overview">
+    <div class="stat-grid">
+      <article class="stat-card"><span>Participants actifs</span><strong data-stat="participants">—</strong></article>
+      <article class="stat-card"><span>Questions actives</span><strong data-stat="questions">—</strong></article>
+      <article class="stat-card stat-accent"><span>Questionnaires terminés</span><strong data-stat="completed">—</strong></article>
+      <article class="stat-card"><span>Réponses collectées</span><strong data-stat="answers">—</strong></article>
+    </div>
+    <div class="admin-card">
+      <div class="card-heading"><h2>Participation</h2><button class="text-button" type="button" data-goto="answers">Voir les réponses →</button></div>
+      <div class="participation-list" data-participation-list><div class="loading-row">Chargement…</div></div>
+    </div>
+    <div class="admin-card logo-settings">
+      <div><h2>Logo du site</h2><p>Affiché à l'ouverture puis dans l'en-tête.</p></div>
+      <form data-logo-form>
+        <span class="upload-preview logo-preview" data-logo-preview><span aria-hidden="true">C</span></span>
+        <label class="button button-secondary button-small file-button">Choisir une image<input type="file" name="image" accept="image/png,image/jpeg,image/webp,image/gif" required></label>
+        <button class="button button-primary button-small" type="submit">Mettre à jour</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="admin-panel" data-panel="participants" hidden>
+    <div class="panel-toolbar">
+      <div><h2>Participants</h2></div>
+      <label class="search-field"><span class="sr-only">Rechercher un participant</span><input type="search" placeholder="Rechercher…" data-search="participants"></label>
+    </div>
+    <div class="admin-card table-wrap">
+      <table><thead><tr><th>Participant</th><th>Contact</th><th>Statut</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody data-participant-table><tr><td colspan="4" class="loading-row">Chargement…</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section class="admin-panel" data-panel="questions" hidden>
+    <div class="panel-toolbar">
+      <div><h2>Questions</h2></div>
+      <div class="toolbar-actions"><label class="search-field"><span class="sr-only">Rechercher une question</span><input type="search" placeholder="Rechercher…" data-search="questions"></label><button class="button button-secondary button-small" type="button" data-generate>Générer les instances</button></div>
+    </div>
+    <div class="admin-card table-wrap">
+      <table><thead><tr><th>Ordre</th><th>Question</th><th>Type / cible</th><th>Statut</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody data-question-table><tr><td colspan="5" class="loading-row">Chargement…</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section class="admin-panel" data-panel="answers" hidden>
+    <div class="panel-toolbar">
+      <div><h2>Réponses</h2></div>
+      <div class="toolbar-actions"><a class="button button-secondary button-small" href="/api/admin/export?format=csv">Exporter CSV</a><a class="button button-ghost button-small" href="/api/admin/export?format=json">JSON</a></div>
+    </div>
+    <form class="filter-bar" data-answer-filters>
+      <label><span>Auteur</span><select name="author_id"><option value="">Tous</option></select></label>
+      <label><span>Cible</span><select name="target_id"><option value="">Toutes</option></select></label>
+      <label><span>Question</span><select name="question_id"><option value="">Toutes</option></select></label>
+      <button class="button button-secondary button-small" type="submit">Filtrer</button>
+    </form>
+    <div class="answer-list" data-answer-list><div class="admin-card loading-row">Chargement…</div></div>
+  </section>
+
+  <section class="admin-panel" data-panel="feedback" hidden>
+    <div class="panel-toolbar"><div><h2>Messages</h2><p>Suggestions envoyées à la fin du questionnaire.</p></div></div>
+    <div class="feedback-list" data-feedback-list><div class="admin-card loading-row">Chargement…</div></div>
+  </section>
+</section>
+
+<dialog class="admin-dialog" data-admin-dialog>
+  <form method="dialog" class="dialog-head"><div><p class="eyebrow" data-dialog-eyebrow>Nouveau</p><h2 data-dialog-title>Ajouter</h2></div><button class="icon-button" value="cancel" aria-label="Fermer">×</button></form>
+  <form class="stack-form" data-entity-form>
+    <input type="hidden" name="id"><input type="hidden" name="entity">
+    <div data-participant-fields>
+      <label class="field"><span>Nom affiché</span><input name="display_name" required></label>
+      <div class="image-field-grid">
+        <label class="image-upload-field"><span>Photo de choix</span><small>Grande photo affichée sur l'accueil</small><span class="upload-preview upload-preview-large" data-preview="choice_photo_url"></span><span class="button button-secondary button-small file-button">Choisir<input type="file" name="choice_photo_file" accept="image/png,image/jpeg,image/webp,image/gif"></span><input type="hidden" name="choice_photo_url"></label>
+        <label class="image-upload-field"><span>Photo de profil</span><small>Petite photo du questionnaire</small><span class="upload-preview upload-preview-profile" data-preview="profile_photo_url"></span><span class="button button-secondary button-small file-button">Choisir<input type="file" name="profile_photo_file" accept="image/png,image/jpeg,image/webp,image/gif"></span><input type="hidden" name="profile_photo_url"></label>
+      </div>
+      <label class="field"><span>Code secret <small>(facultatif)</small></span><input name="secret_code"></label>
+    </div>
+    <div data-question-fields hidden>
+      <label class="field"><span>Titre interne</span><input name="title"></label>
+      <label class="field"><span>Question</span><textarea name="body" rows="4"></textarea><small>Placeholders : {person}, {person1}, {person2}, {person3}</small></label>
+      <div class="field-row"><label class="field"><span>Type</span><select name="type"><option value="free_text">Texte libre</option><option value="single_person_answer">Sur une personne</option><option value="compare_two">Comparaison à 2</option><option value="compare_three">Comparaison à 3</option><option value="ranking">Classement</option><option value="binary_split">Deux catégories</option><option value="slider">Curseur</option></select></label><label class="field"><span>Cible</span><select name="target_mode"><option value="none">Aucune</option><option value="one_person">1 personne</option><option value="two_people">2 personnes</option><option value="three_people">3 personnes</option><option value="all_people">Tout le groupe</option></select></label></div>
+      <div class="field-row"><label class="field"><span>Ordre</span><input type="number" name="display_order" min="0" value="0"></label><label class="field"><span>Catégorie</span><input name="category"></label></div>
+      <div class="field-row" data-scale-fields hidden><label class="field"><span>Minimum</span><input type="number" name="scale_min" value="0"></label><label class="field"><span>Maximum</span><input type="number" name="scale_max" value="100"></label></div>
+      <label class="check-field"><input type="checkbox" name="allow_self_target"><span>Autoriser à répondre sur soi-même</span></label>
+    </div>
+    <label class="check-field"><input type="checkbox" name="is_active" checked><span>Actif</span></label>
+    <p class="form-error" data-dialog-error role="alert" hidden></p>
+    <button class="button button-primary button-wide" type="submit">Enregistrer</button>
+  </form>
+</dialog>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script>{% endblock %}

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111a35">
+  <meta name="description" content="Cedz Are Shooting — le questionnaire du T24.">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <title>{% block title %}Cedz Are Shooting{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/background.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <a class="skip-link" href="#main">Aller au contenu</a>
+  <div class="site-shell">
+    <header class="site-header">
+      <a class="brand" href="{{ url_for('index') if request.endpoint else '/' }}" aria-label="Cedz Are Shooting, retour à l'accueil">
+        {% if site_logo_url %}<img class="brand-logo" src="{{ site_logo_url }}" alt="">{% else %}<span class="brand-mark" aria-hidden="true">C</span>{% endif %}
+        <span><strong>CEDZ</strong><small>Are Shooting</small></span>
+      </a>
+      {% block header_actions %}{% endblock %}
+    </header>
+
+    <main id="main" tabindex="-1">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash-stack" aria-live="polite">
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+      {% block footer_quote %}<span>La ligne d'arrivée se rapproche.</span>{% endblock %}
+      <a href="/admin">Espace admin</a>
+    </footer>
+  </div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
