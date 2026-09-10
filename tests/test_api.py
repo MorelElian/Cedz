@@ -19,8 +19,15 @@ def client(app):
     return app.test_client()
 
 
+def authenticate_as(client, participant_id):
+    with client.session_transaction() as browser_session:
+        browser_session.clear()
+        browser_session["participant_id"] = participant_id
+
+
 def start_session(client):
     participant = client.get("/api/participants").get_json()["participants"][0]
+    authenticate_as(client, participant["id"])
     response = client.post("/api/sessions", json={"participantId": participant["id"],
                            "email": "ami@example.fr", "phone": "+33 6 12 34 56 78"})
     assert response.status_code == 201
@@ -105,15 +112,16 @@ def test_participant_flow_does_not_expose_answers(client):
     answer_all_questions(client, session_id)
     assert client.post(f"/api/sessions/{session_id}/complete").get_json()["completed"] is True
     assert client.post(f"/api/sessions/{session_id}/answers",
-                       json={"questionInstanceId": question["instanceId"], "answer": "Tard"}).status_code == 200
+                       json={"questionInstanceId": question["instanceId"], "answer": "Tard"}).status_code == 403
     login_admin(client)
     admin_answers = client.get("/api/admin/answers").get_json()["answers"]
     updated = next(item for item in admin_answers if item["questionInstanceId"] == question["instanceId"])
-    assert updated["answer"] == "Tard"
+    assert updated["answer"] == "Il va surprendre."
 
 
 def test_participant_resumes_the_only_existing_session(client):
     participant = client.get("/api/participants").get_json()["participants"][0]
+    authenticate_as(client, participant["id"])
     started = client.post("/api/sessions", json={
         "participantId": participant["id"], "email": "ami@example.fr", "phone": "",
     })
@@ -218,6 +226,7 @@ def test_final_feedback_is_visible_to_admin(client):
 @pytest.mark.parametrize(("email", "phone"), [("pas-un-mail", "+33612345678"), ("ok@example.fr", "12")])
 def test_session_rejects_invalid_contact(client, email, phone):
     participant = client.get("/api/participants").get_json()["participants"][0]
+    authenticate_as(client, participant["id"])
     response = client.post("/api/sessions", json={"participantId": participant["id"], "email": email, "phone": phone})
     assert response.status_code == 400
 
@@ -237,9 +246,9 @@ def test_admin_crud_generation_and_export(client):
 
 
 def test_structured_comparison_is_validated(client):
-    _, session_id = start_session(client)
+    participant, session_id = start_session(client)
     questions = client.get(f"/api/sessions/{session_id}/questions").get_json()["questions"]
-    comparison = next(q for q in questions if q["type"] == "compare_two")
+    comparison = next(q for q in questions if q["type"] in {"compare_two", "compare_three"})
     response = client.post(f"/api/sessions/{session_id}/answers", json={"questionInstanceId": comparison["instanceId"],
                            "answer": {"selectedParticipantId": 999999, "comment": "triche"}})
     assert response.status_code == 400
@@ -247,6 +256,7 @@ def test_structured_comparison_is_validated(client):
 
 def test_phone_is_optional(client):
     participant = client.get("/api/participants").get_json()["participants"][0]
+    authenticate_as(client, participant["id"])
     response = client.post("/api/sessions", json={
         "participantId": participant["id"],
         "email": "ami-sans-telephone@example.fr",
@@ -261,7 +271,7 @@ def test_admin_mutations_require_csrf(client):
     assert response.status_code == 403
 
 
-def test_all_seed_question_types_accept_valid_answers(client):
+def test_all_sampled_question_types_accept_valid_answers(client):
     _, session_id = start_session(client)
     payload = client.get(f"/api/sessions/{session_id}/questions").get_json()
     participant_ids = [person["id"] for person in payload["participants"]]
@@ -277,11 +287,12 @@ def test_all_seed_question_types_accept_valid_answers(client):
         })
         assert response.status_code == 200, (question_type, response.get_json())
         answers[question_type] = value
-    assert answers.keys() >= {"free_text", "slider", "compare_two", "compare_three", "ranking", "binary_split"}
+    assert answers.keys() == {question["type"] for question in payload["questions"]}
+    assert "ranking" in answers
 
 
 def test_regenerating_instances_preserves_active_session_answers(client):
-    _, session_id = start_session(client)
+    participant, session_id = start_session(client)
     before = client.get(f"/api/sessions/{session_id}/questions").get_json()
     question = before["questions"][0]
     saved = client.post(f"/api/sessions/{session_id}/answers", json={
@@ -291,8 +302,12 @@ def test_regenerating_instances_preserves_active_session_answers(client):
     assert saved.status_code == 200
     csrf = login_admin(client)
     assert client.post("/api/admin/questions/generate-instances", headers=csrf).status_code == 200
+    authenticate_as(client, participant["id"])
     after = client.get(f"/api/sessions/{session_id}/questions").get_json()
-    assert [item["instanceId"] for item in after["questions"]] == [item["instanceId"] for item in before["questions"]]
+    assert [item["instanceId"] for item in after["questions"]] == [
+        item["instanceId"] for item in before["questions"] if item["instanceId"] != question["instanceId"]
+    ]
+    assert after["remainingCount"] == before["totalCount"] - 1
     assert str(question["instanceId"]) in after["answersByInstance"]
 
 

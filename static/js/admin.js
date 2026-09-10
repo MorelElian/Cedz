@@ -2,7 +2,7 @@
   const app = document.querySelector('[data-admin-app]');
   if (!app) return;
 
-  const state = {participants: [], questions: [], answers: [], feedback: [], settings: {}, csrf: document.querySelector('meta[name="csrf-token"]')?.content || ''};
+  const state = {participants: [], questions: [], answers: [], feedback: [], stats: {}, settings: {}, csrf: document.querySelector('meta[name="csrf-token"]')?.content || ''};
   const dialog = document.querySelector('[data-admin-dialog]');
   const entityForm = dialog.querySelector('[data-entity-form]');
   const status = app.querySelector('[data-admin-status]');
@@ -44,13 +44,14 @@
 
   async function loadAll() {
     try {
-      const [participantsPayload, questionsPayload, answersPayload, feedbackPayload, settingsPayload] = await Promise.all([
-        api('/api/admin/participants'), api('/api/admin/questions'), api('/api/admin/answers'), api('/api/admin/feedback'), api('/api/admin/settings')
+      const [participantsPayload, questionsPayload, answersPayload, feedbackPayload, statsPayload, settingsPayload] = await Promise.all([
+        api('/api/admin/participants'), api('/api/admin/questions'), api('/api/admin/answers'), api('/api/admin/feedback'), api('/api/admin/stats'), api('/api/admin/settings')
       ]);
       state.participants = unwrap(participantsPayload, 'participants');
       state.questions = unwrap(questionsPayload, 'questions');
       state.answers = unwrap(answersPayload, 'answers');
       state.feedback = unwrap(feedbackPayload, 'feedback');
+      state.stats = statsPayload || {};
       state.settings = settingsPayload.settings || settingsPayload.data || settingsPayload;
       renderAll(); announce('Tableau de bord à jour.');
     } catch (reason) { announce(reason.message, true); renderFailure(); }
@@ -61,14 +62,14 @@
   function renderStats() {
     const activeParticipants = state.participants.filter(item => pick(item, 'isActive', 'is_active') !== false).length;
     const activeQuestions = state.questions.filter(item => pick(item, 'isActive', 'is_active') !== false).length;
-    const completed = new Set(state.answers.filter(answer => pick(answer, 'sessionCompleted', 'session_completed', 'completed')).map(answer => pick(answer, 'sessionId', 'session_id'))).size;
-    const values = {participants:activeParticipants, questions:activeQuestions, completed, answers:state.answers.length};
+    const values = {participants:activeParticipants, questions:activeQuestions, completed:state.stats.completed ?? 0, answers:state.stats.answerCount ?? state.answers.length};
     Object.entries(values).forEach(([key,value]) => { const node=app.querySelector(`[data-stat="${key}"]`); if(node) node.textContent=value; });
     const participation = app.querySelector('[data-participation-list]');
     if (!state.participants.length) { participation.innerHTML='<div class="empty-state"><strong>Personne sur la ligne de départ.</strong></div>'; return; }
     participation.innerHTML = state.participants.map(person => {
-      const count=state.answers.filter(answer=>String(pick(answer,'authorParticipantId','author_participant_id'))===String(person.id)).length;
-      const max=Math.max(1,state.questions.length), percent=Math.min(100,Math.round(count/max*100));
+      const progress=(state.stats.progress || []).find(item=>String(item.participantId)===String(person.id));
+      const count=progress?.answered ?? state.answers.filter(answer=>String(pick(answer,'authorParticipantId','author_participant_id'))===String(person.id)).length;
+      const percent=progress?.percent ?? 0;
       return `<div class="participation-row"><strong>${esc(personName(person))}</strong><span class="mini-progress" aria-label="${percent}%"><span style="width:${percent}%"></span></span><span>${count} réponse${count>1?'s':''}</span></div>`;
     }).join('');
   }
@@ -77,7 +78,7 @@
     const tbody=app.querySelector('[data-participant-table]');
     const items=state.participants.filter(person=>personName(person).toLowerCase().includes(filter.toLowerCase()));
     if(!items.length){tbody.innerHTML='<tr><td colspan="4" class="loading-row">Aucun participant.</td></tr>';return;}
-    tbody.innerHTML=items.map(person=>{const active=pick(person,'isActive','is_active')!==false;const avatar=pick(person,'profilePhotoUrl','profile_photo_url','choicePhotoUrl','choice_photo_url');const email=pick(person,'email')||'—';const phone=pick(person,'phone')||'—';return `<tr data-row-id="${esc(person.id)}"><td><span class="person-cell"><span class="mini-avatar">${avatar?`<img src="${esc(avatar)}" alt="">`:esc(personName(person).slice(0,2).toUpperCase())}</span>${esc(personName(person))}</span></td><td>${esc(email)}<br><small>${esc(phone)}</small></td><td><span class="badge ${active?'badge-active':'badge-inactive'}">${active?'Actif':'En pause'}</span></td><td><span class="table-actions"><button class="icon-button" type="button" data-edit-participant="${esc(person.id)}" aria-label="Modifier ${esc(personName(person))}">✎</button><button class="icon-button" type="button" data-toggle-participant="${esc(person.id)}" aria-label="${active?'Désactiver':'Activer'} ${esc(personName(person))}">${active?'Ⅱ':'▶'}</button></span></td></tr>`;}).join('');
+    tbody.innerHTML=items.map(person=>{const active=pick(person,'isActive','is_active')!==false;const avatar=pick(person,'profilePhotoUrl','profile_photo_url','choicePhotoUrl','choice_photo_url');const email=pick(person,'email')||'—';const phone=pick(person,'phone')||'—';return `<tr data-row-id="${esc(person.id)}"><td><span class="person-cell"><span class="mini-avatar">${avatar?`<img src="${esc(avatar)}" alt="">`:esc(personName(person).slice(0,2).toUpperCase())}</span>${esc(personName(person))}</span></td><td>${esc(email)}<br><small>${esc(phone)}</small></td><td><span class="badge ${active?'badge-active':'badge-inactive'}">${active?'Actif':'En pause'}</span></td><td><span class="table-actions"><button class="icon-button" type="button" data-set-password="${esc(person.id)}" data-person-name="${esc(personName(person))}" aria-label="Définir le mot de passe de ${esc(personName(person))}">⌁</button><button class="icon-button" type="button" data-edit-participant="${esc(person.id)}" aria-label="Modifier ${esc(personName(person))}">✎</button><button class="icon-button" type="button" data-toggle-participant="${esc(person.id)}" aria-label="${active?'Désactiver':'Activer'} ${esc(personName(person))}">${active?'Ⅱ':'▶'}</button></span></td></tr>`;}).join('');
   }
 
   function renderQuestions(filter = '') {
@@ -127,7 +128,7 @@
 
   function formPayload() {
     const data=new FormData(entityForm), entity=data.get('entity');
-    if(entity==='participant')return {displayName:data.get('display_name'),choicePhotoUrl:data.get('choice_photo_url')||null,profilePhotoUrl:data.get('profile_photo_url')||null,secretCode:data.get('secret_code')||null,isActive:data.get('is_active')==='on'};
+    if(entity==='participant')return {displayName:data.get('display_name'),email:data.get('email')||null,choicePhotoUrl:data.get('choice_photo_url')||null,profilePhotoUrl:data.get('profile_photo_url')||null,secretCode:data.get('secret_code')||null,isActive:data.get('is_active')==='on'};
     const payload={title:data.get('title'),body:data.get('body'),type:data.get('type'),targetMode:data.get('target_mode'),displayOrder:Number(data.get('display_order')),category:data.get('category'),allowSelfTarget:data.get('allow_self_target')==='on',isActive:data.get('is_active')==='on'};
     if(payload.type==='slider'){payload.scaleMin=Number(data.get('scale_min'));payload.scaleMax=Number(data.get('scale_max'));} return payload;
   }

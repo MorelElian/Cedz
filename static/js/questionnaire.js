@@ -54,6 +54,7 @@
       else Object.entries(existing).forEach(([instanceId, answer]) => answers.set(String(instanceId), answer));
       index = Math.max(0, Number(payload.current_index || payload.data?.current_index || 0));
       totalLabel.textContent = questions.length;
+      if (!questions.length && Number(payload.remainingCount ?? payload.remaining_count) === 0) return complete();
       if (!questions.length) return showEmpty();
       nav.hidden = false;
       render();

@@ -1,7 +1,7 @@
 # Cedz Are Shooting
 
-MVP local Flask pour préparer les participants et les questions, collecter les
-réponses du groupe, puis les consulter uniquement depuis l'administration.
+Application Flask locale pour collecter les réponses du groupe, préparer des
+révélations et donner à chaque participant un espace personnel.
 
 ## Lancer en local
 
@@ -11,6 +11,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 flask --app app run --debug
 ```
+
+Pour tester les envois Gmail réels, lancer plutôt
+`./scripts/run_local_gmail.sh` et saisir le mot de passe d'application demandé.
 
 Ouvrir ensuite <http://127.0.0.1:5000>.
 
@@ -28,11 +31,30 @@ L'administration permet aussi de déposer le logo du site et deux photos par
 participant (grande photo de choix et petite photo de profil). Les fichiers PNG,
 JPEG, GIF et WebP de 5 Mo maximum sont stockés dans `instance/uploads/`.
 
-Une seule participation principale est utilisée par participant. Un jeton de
-reprise aléatoire est conservé dans le navigateur afin de retrouver et modifier
-les réponses sans exposer la session avec la seule adresse email. Pour une
-ancienne session créée avant cette version, définir un code secret participant
-dans l'administration permet la reprise depuis un nouveau navigateur.
+Une seule participation principale est utilisée par participant. Depuis
+**Administration → Participants**, définir son mot de passe avant de lui donner
+accès. Il se connecte avec son nom affiché et ce mot de passe. Un questionnaire
+commencé peut être repris ; un questionnaire terminé reste verrouillé.
+
+## Importer les réponses existantes
+
+Dans **Administration → Réponses**, importer directement l'export JSON. Un même
+fichier peut être importé plusieurs fois : les réponses déjà connues ne sont pas
+dupliquées. L'import est transactionnel et reconstruit aussi l'avancement des
+questionnaires. Les exports placés dans `answers/` et le fichier local
+`mails.csv` sont ignorés par Git pour ne pas publier de données privées.
+
+## Préparer les révélations
+
+L'onglet **Révélations** propose exactement dix cartes, une par participant.
+Chaque carte peut être retouchée, remise à plus tard ou rejetée. L'acceptation
+fige le contenu puis l'envoie réellement avec Gmail. Si Gmail refuse l'envoi, la
+révélation reste en attente et peut être retentée. L'adresse de chaque
+participant se règle dans l'onglet **Participants**.
+
+Le participant ne voit que les révélations marquées comme envoyées. Il peut
+répondre une seule fois à chacune ; cette réponse est visible uniquement par
+l'auteur de la réponse d'origine et par l'administrateur.
 
 Avant d'envoyer le lien aux joueurs, finaliser les participants et les questions,
 puis cliquer sur « Générer les instances ». Ne plus régénérer après le début du
@@ -56,7 +78,16 @@ export T24_ADMIN_PASSWORD="un-mot-de-passe-solide"
 export T24_SECURE_COOKIE=1
 export T24_ENV=production
 export T24_DATABASE="/chemin/persistant/t24.sqlite3"
+export T24_MAIL_MODE="gmail"
+export T24_SMTP_USER="cedzt24@gmail.com"
+export T24_SMTP_PASSWORD="mot-de-passe-application-Google"
+export T24_MAIL_FROM="Cedz Are Shooting <cedzt24@gmail.com>"
+export T24_PUBLIC_BASE_URL="https://cedz-production.up.railway.app"
 ```
+
+Pour démarrer en local sans écrire le secret Gmail sur disque, utiliser
+`./scripts/run_local_gmail.sh` : le mot de passe d'application est demandé à
+chaque lancement et reste uniquement en mémoire.
 
 Le téléphone participant est facultatif. Les réponses ne sont jamais exposées
 par les routes publiques ; seule une session admin permet de les lire/exporter.
@@ -102,6 +133,11 @@ augmente nettement.
    - `T24_UPLOAD_FOLDER=/app/storage/uploads`
    - `T24_SECRET_KEY` avec une longue valeur aléatoire
    - `T24_ADMIN_PASSWORD` avec un mot de passe administrateur solide
+   - `T24_MAIL_MODE=gmail`
+   - `T24_SMTP_USER=cedzt24@gmail.com`
+   - `T24_SMTP_PASSWORD` avec le mot de passe d'application Google
+   - `T24_MAIL_FROM=Cedz Are Shooting <cedzt24@gmail.com>`
+   - `T24_PUBLIC_BASE_URL=https://cedz-production.up.railway.app`
 5. Dans **Settings → Deploy**, définir le healthcheck sur `/health`.
 6. Dans **Settings → Networking**, cliquer sur **Generate Domain**.
 

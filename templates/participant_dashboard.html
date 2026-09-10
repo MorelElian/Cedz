@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Cedz Are Shooting · Mon espace{% endblock %}
+{% block body_class %}page-account{% endblock %}
+{% block head %}<meta name="csrf-token" content="{{ csrf_token | default('', true) }}">{% endblock %}
+{% block header_actions %}
+  <form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token | default('', true) }}"><button class="button button-ghost button-small" type="submit">Déconnexion</button></form>
+{% endblock %}
+{% block content %}
+<section class="account-shell" data-account-app>
+  <div class="account-loading" data-account-loading role="status"><span class="spinner" aria-hidden="true"></span> Ouverture du casier…</div>
+  <div data-account-content hidden>
+    <header class="account-hero">
+      <div class="account-avatar" data-account-avatar aria-hidden="true"></div>
+      <div><p class="eyebrow">Espace participant</p><h1>Salut <em data-account-name>toi</em>.</h1><p>Tout ce qu'on a osé t'envoyer. Rien de plus.</p></div>
+      <a class="button button-secondary" data-questionnaire-link hidden>Finir mon questionnaire</a>
+    </header>
+
+    <section class="account-section" aria-labelledby="latest-title">
+      <div class="section-heading compact-heading"><div><p class="eyebrow">Dernière livraison</p><h2 id="latest-title">Fraîchement balancé</h2></div></div>
+      <div data-latest-revelation></div>
+    </section>
+
+    <section class="account-section" aria-labelledby="ranking-title">
+      <div class="section-heading compact-heading"><div><p class="eyebrow">Seulement ce que tu sais déjà</p><h2 id="ranking-title">Ta cote dans le vestiaire</h2></div></div>
+      <div class="discipline-grid" data-rankings></div>
+    </section>
+
+    <section class="account-section" aria-labelledby="history-title">
+      <div class="section-heading compact-heading"><div><p class="eyebrow">Les dossiers sortis</p><h2 id="history-title">Ce qu'ils pensent de moi</h2></div></div>
+      <div class="revelation-history" data-revelation-history></div>
+    </section>
+
+    <section class="account-section" aria-labelledby="answers-title">
+      <div class="section-heading compact-heading"><div><p class="eyebrow">Tes propres casseroles</p><h2 id="answers-title">Mes réponses</h2></div></div>
+      <div class="answer-accordions" data-my-answers></div>
+    </section>
+
+    <section class="account-section" aria-labelledby="received-replies-title">
+      <div class="section-heading compact-heading"><div><p class="eyebrow">Retour à l'envoyeur</p><h2 id="received-replies-title">Réponses reçues</h2></div></div>
+      <div class="received-replies" data-replies-received></div>
+    </section>
+
+    <details class="password-panel">
+      <summary>Changer mon mot de passe</summary>
+      <form class="stack-form" data-password-form>
+        <label class="field"><span>Mot de passe actuel</span><input type="password" name="currentPassword" autocomplete="current-password" required></label>
+        <label class="field"><span>Nouveau mot de passe</span><input type="password" name="newPassword" autocomplete="new-password" minlength="8" maxlength="128" required></label>
+        <button class="button button-secondary" type="submit">Mettre à jour</button>
+        <p class="form-note" data-password-status role="status"></p>
+      </form>
+    </details>
+  </div>
+  <div class="error-state" data-account-error hidden><span aria-hidden="true">⚠</span><h2>Le casier est coincé.</h2><p>Recharge la page dans un instant.</p></div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/account.js') }}" defer></script>{% endblock %}

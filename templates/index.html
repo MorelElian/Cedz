@@ -37,14 +37,14 @@
     </div>
   </div>
 
-  <form class="start-form" action="/api/sessions" method="post" data-session-form>
+  <form class="start-form" action="/login" method="get" data-session-form>
     <fieldset class="participant-fieldset">
       <legend class="sr-only">Choisir mon profil</legend>
       <div class="participant-grid" data-participant-grid aria-live="polite" aria-busy="true">
         {% if participants %}
           {% for participant in participants %}
             <label class="participant-card">
-              <input type="radio" name="participant_id" value="{{ participant.id }}" required>
+              <input type="radio" name="name" value="{{ participant.display_name }}" required>
               <span class="participant-visual">
                 {% set choice_photo = participant.choice_photo_url or participant.choicePhotoUrl or participant.avatar_url %}
                 {% if choice_photo %}<img src="{{ choice_photo }}" alt="" loading="lazy">{% else %}<span class="avatar-fallback" aria-hidden="true">{{ participant.display_name[:2] | upper }}</span>{% endif %}
@@ -63,28 +63,15 @@
       </div>
     </fieldset>
 
-    <div class="identity-panel" data-identity-panel>
+    <div class="identity-panel identity-panel-simple" data-identity-panel>
       <div class="identity-copy">
-        <h3>Juste pour te reconnaître.</h3>
-        <p>Ton email permet de retrouver ta session.</p>
+        <h3>Tu t'es reconnu&nbsp;?</h3>
+        <p>Récupère ton casier, puis ton questionnaire si tu ne l'as pas fini.</p>
       </div>
       <div class="form-fields">
-        <label class="field">
-          <span>Adresse email</span>
-          <input type="email" name="email" autocomplete="email" placeholder="toi@exemple.fr" required>
-        </label>
-        <label class="field">
-          <span>Numéro de téléphone</span>
-          <input type="tel" name="phone" autocomplete="tel" inputmode="tel" placeholder="06 12 34 56 78">
-          <small>Facultatif</small>
-        </label>
-        <label class="field" data-secret-field hidden>
-          <span>Code secret</span>
-          <input type="text" name="secret_code" autocomplete="one-time-code" inputmode="numeric">
-        </label>
         <p class="form-error" data-form-error role="alert" hidden></p>
         <button class="button button-primary button-wide" type="submit" data-submit-session>
-          <span>C'est parti</span><span aria-hidden="true">→</span>
+          <span>Continuer</span><span aria-hidden="true">→</span>
         </button>
       </div>
     </div>

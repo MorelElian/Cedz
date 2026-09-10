@@ -1,0 +1,132 @@
+(() => {
+  const app = document.querySelector('[data-account-app]');
+  if (!app) return;
+
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+  const pick = (object, ...keys) => keys.map(key => object?.[key]).find(value => value !== undefined && value !== null);
+  const list = (payload, key) => Array.isArray(payload) ? payload : payload?.[key] || payload?.data?.[key] || [];
+
+  async function api(path, options = {}) {
+    const headers = {'Accept': 'application/json', ...(options.body ? {'Content-Type': 'application/json'} : {}), ...options.headers};
+    if (options.method && options.method !== 'GET' && csrf) headers['X-CSRF-Token'] = csrf;
+    const response = await fetch(path, {...options, headers});
+    if (response.status === 401) { window.location.assign('/login'); throw new Error('Session expirée.'); }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || payload.message || 'Impossible de charger ton espace.');
+    return payload.data || payload;
+  }
+
+  function avatarMarkup(person, className = '') {
+    const name = pick(person, 'displayName', 'display_name', 'name') || '?';
+    const url = pick(person, 'profilePhotoUrl', 'profile_photo_url', 'avatarUrl', 'avatar_url');
+    return url ? `<img class="${className}" src="${esc(url)}" alt="">` : `<span class="${className}">${esc(name.slice(0, 2).toUpperCase())}</span>`;
+  }
+
+  function revelationMarkup(item, featured = false) {
+    if (!item) return '<div class="empty-state compact-empty"><strong>Rien pour le moment.</strong><p>Profite du calme.</p></div>';
+    const author = pick(item, 'author', 'authorParticipant', 'author_participant') || {};
+    const authorName = pick(item, 'authorName', 'author_name') || pick(author, 'displayName', 'display_name', 'name') || 'Inconnu';
+    const question = pick(item, 'question', 'questionText', 'question_text', 'title') || 'Le comité a parlé';
+    const content = pick(item, 'finalContent', 'final_content', 'content', 'body') || '—';
+    const id = pick(item, 'id', 'revelationId', 'revelation_id');
+    const date = pick(item, 'sentAt', 'sent_at', 'createdAt', 'created_at') || '';
+    return `<article class="revelation-card${featured ? ' revelation-featured' : ''}">
+      <header><span class="mini-avatar">${avatarMarkup(author)}</span><span><small>Par</small><strong>${esc(authorName)}</strong></span>${date ? `<time>${esc(formatDate(date))}</time>` : ''}</header>
+      <p class="revelation-question">${esc(question)}</p><blockquote>${esc(content)}</blockquote>
+      ${id ? `<a class="text-button" href="/revelations/${encodeURIComponent(id)}">Voir et répondre →</a>` : ''}
+    </article>`;
+  }
+
+  function formatDate(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('fr-FR', {day:'numeric', month:'short', year:'numeric'}).format(date);
+  }
+
+  function renderRankings(rankings) {
+    const labels = {swim:['Nage','≈'], bike:['Vélo','↗'], run:['Course','→']};
+    const aliases = {swimming:'swim', cycling:'bike', running:'run', nage:'swim', velo:'bike', 'vélo':'bike', course:'run'};
+    const normalized = {};
+    if (Array.isArray(rankings)) rankings.forEach(item => { normalized[aliases[String(item.discipline).toLowerCase()] || item.discipline] = item; });
+    else Object.entries(rankings || {}).forEach(([key, value]) => { normalized[aliases[key.toLowerCase()] || key] = typeof value === 'object' ? value : {averagePosition:value}; });
+    app.querySelector('[data-rankings]').innerHTML = Object.entries(labels).map(([key, [label, mark]]) => {
+      const item = normalized[key] || {}, value = pick(item, 'averagePosition', 'average_position', 'average', 'position');
+      const count = Number(pick(item, 'revealedCount', 'revealed_count', 'count') || 0);
+      return `<article class="discipline-card discipline-${key}"><span aria-hidden="true">${mark}</span><p>${label}</p><strong>${value ? `${Number(value).toLocaleString('fr-FR', {maximumFractionDigits:1})}<sup>e</sup>` : '—'}</strong><small>${count ? `${count} avis révélé${count > 1 ? 's' : ''}` : 'Pas encore de classement'}</small></article>`;
+    }).join('');
+  }
+
+  function renderAnswers(answers, participantNames = {}) {
+    const root = app.querySelector('[data-my-answers]');
+    if (!answers.length) { root.innerHTML = '<div class="empty-state compact-empty"><strong>Aucune réponse.</strong></div>'; return; }
+    const groups = answers.reduce((result, answer) => {
+      const category = pick(answer, 'category', 'questionCategory', 'question_category') || 'Autres';
+      (result[category] ||= []).push(answer); return result;
+    }, {});
+    root.innerHTML = Object.entries(groups).sort(([a], [b]) => a.localeCompare(b, 'fr')).map(([category, items]) => `<details class="answer-group"><summary><span>${esc(category)}</span><small>${items.length} réponse${items.length > 1 ? 's' : ''}</small></summary><div>${items.map(item => {
+      const question = pick(item, 'renderedQuestion', 'rendered_question', 'question', 'questionText', 'question_text') || 'Question';
+      let answer = pick(item, 'displayAnswer', 'display_answer', 'answerText', 'answer_text', 'answerNumber', 'answer_number', 'answer', 'answerJson', 'answer_json');
+      if (typeof answer === 'object') {
+        const name = id => participantNames[String(id)] || `#${id}`;
+        if (answer.selected_participant_id) answer = name(answer.selected_participant_id) + (answer.comment ? ` — ${answer.comment}` : '');
+        else if (answer.ordered_participant_ids) answer = answer.ordered_participant_ids.map((id, index) => `${index + 1}. ${name(id)}`).join(' · ');
+        else if (answer.category_a || answer.category_b) answer = `Groupe A : ${(answer.category_a || []).map(name).join(', ')} · Groupe B : ${(answer.category_b || []).map(name).join(', ')}`;
+        else answer = pick(answer, 'display', 'label', 'text') || JSON.stringify(answer);
+      }
+      return `<article><p>${esc(question)}</p><strong>${esc(answer ?? '—')}</strong></article>`;
+    }).join('')}</div></details>`).join('');
+  }
+
+  function renderReplies(replies) {
+    const root = app.querySelector('[data-replies-received]');
+    if (!replies.length) { root.innerHTML = '<div class="empty-state compact-empty"><strong>Aucun retour pour l’instant.</strong><p>Ils cherchent sûrement leurs mots.</p></div>'; return; }
+    root.innerHTML = replies.map(reply => `<article class="received-reply"><header><strong>${esc(pick(reply, 'from_participant', 'fromParticipant', 'authorName', 'author_name') || 'Un participant')}</strong><time>${esc(formatDate(pick(reply, 'created_at', 'createdAt') || ''))}</time></header><blockquote>${esc(pick(reply, 'message', 'content') || '—')}</blockquote></article>`).join('');
+  }
+
+  async function load() {
+    try {
+      const [payload, participantsPayload] = await Promise.all([api('/api/account/dashboard'), api('/api/participants')]);
+      const participantNames = Object.fromEntries(list(participantsPayload, 'participants').map(person => [String(person.id), pick(person, 'displayName', 'display_name', 'name')]));
+      const participant = payload.participant || payload.user || {};
+      const name = pick(participant, 'displayName', 'display_name', 'name') || 'toi';
+      app.querySelector('[data-account-name]').textContent = name;
+      app.querySelector('[data-account-avatar]').innerHTML = avatarMarkup(participant);
+      const revelations = list(payload, 'revelations');
+      const latest = payload.latestRevelation || payload.latest_revelation || revelations[0];
+      app.querySelector('[data-latest-revelation]').innerHTML = revelationMarkup(latest, true);
+      app.querySelector('[data-revelation-history]').innerHTML = revelations.length ? revelations.map(item => revelationMarkup(item)).join('') : '<div class="empty-state compact-empty"><strong>Personne n’a encore parlé.</strong><p>Enfin, officiellement.</p></div>';
+      renderRankings(payload.rankingStats || payload.ranking_stats || payload.rankings || payload.averageRankings || payload.average_rankings || {});
+      renderAnswers(list(payload, 'answers'), participantNames);
+      renderReplies(payload.repliesReceived || payload.replies_received || []);
+      const questionnaire = payload.questionnaire || {};
+      const link = app.querySelector('[data-questionnaire-link]');
+      const questionnaireUrl = pick(payload, 'questionnaireUrl', 'questionnaire_url') || pick(questionnaire, 'url', 'questionnaireUrl', 'questionnaire_url');
+      const questionnaireComplete = pick(payload, 'questionnaireComplete', 'questionnaire_complete') ?? pick(questionnaire, 'completed', 'isComplete', 'is_complete');
+      const remainingCount = Number(pick(questionnaire, 'remainingCount', 'remaining_count'));
+      if (questionnaireUrl && questionnaireComplete !== true) {
+        link.href = questionnaireUrl;
+        link.textContent = Number.isFinite(remainingCount) ? `Continuer · ${remainingCount} question${remainingCount > 1 ? 's' : ''}` : 'Continuer le questionnaire';
+        link.hidden = false;
+      }
+      app.querySelector('[data-account-loading]').hidden = true;
+      app.querySelector('[data-account-content]').hidden = false;
+    } catch (_) {
+      app.querySelector('[data-account-loading]').hidden = true;
+      app.querySelector('[data-account-error]').hidden = false;
+    }
+  }
+
+  app.querySelector('[data-password-form]').addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!event.currentTarget.reportValidity()) return;
+    const button = event.currentTarget.querySelector('button');
+    const status = app.querySelector('[data-password-status]');
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    button.disabled = true; status.textContent = 'Mise à jour…';
+    try { await api('/api/account/password', {method:'PATCH', body:JSON.stringify(values)}); event.currentTarget.reset(); status.textContent = 'Mot de passe changé.'; }
+    catch (error) { status.textContent = error.message; }
+    finally { button.disabled = false; }
+  });
+
+  load();
+})();

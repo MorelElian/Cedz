@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Cedz Are Shooting · Révélation{% endblock %}
+{% block body_class %}page-revelation{% endblock %}
+{% block head %}<meta name="csrf-token" content="{{ csrf_token | default('', true) }}">{% endblock %}
+{% block header_actions %}<a class="button button-ghost button-small" href="/mon-compte">← Mon espace</a>{% endblock %}
+{% block content %}
+<article class="revelation-detail" data-revelation-detail data-revelation-id="{{ revelation_id }}">
+  <div class="account-loading" data-detail-loading role="status"><span class="spinner" aria-hidden="true"></span> On ressort le dossier…</div>
+  <div data-detail-content hidden>
+    <header class="revelation-detail-head">
+      <div class="author-face" data-author-avatar aria-hidden="true"></div>
+      <div><p class="eyebrow" data-revelation-type>Révélation</p><h1 data-revelation-title>Le comité a parlé.</h1><p>Par <strong data-author-name>quelqu'un</strong></p></div>
+    </header>
+    <div class="mail-result-card" data-revelation-body></div>
+    <section class="reply-card" data-reply-section>
+      <h2>Tu veux lui répondre&nbsp;?</h2>
+      <p>Une seule cartouche. Elle sera visible uniquement par l'auteur.</p>
+      <form class="stack-form" data-reply-form>
+        <label class="field"><span>Ta réponse</span><textarea name="message" rows="4" maxlength="2000" required></textarea></label>
+        <button class="button button-primary" type="submit">Envoyer ma réponse</button>
+        <p class="form-note" data-reply-status role="status"></p>
+      </form>
+      <blockquote data-existing-reply hidden></blockquote>
+    </section>
+  </div>
+  <div class="error-state" data-detail-error hidden><span aria-hidden="true">⚠</span><h2>Dossier introuvable.</h2><p>Il n'est peut-être pas encore sorti.</p></div>
+</article>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/revelation.js') }}" defer></script>{% endblock %}

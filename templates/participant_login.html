@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Cedz Are Shooting · Connexion{% endblock %}
+{% block body_class %}page-login page-participant-login{% endblock %}
+{% block header_actions %}<span class="header-pill">Zone du vestiaire</span>{% endblock %}
+{% block content %}
+<section class="login-card participant-login-card" aria-labelledby="login-title">
+  <div class="login-badge" aria-hidden="true">C</div>
+  <p class="eyebrow">Accès participant</p>
+  <h1 id="login-title">Retrouve ton <em>casier</em></h1>
+  <p class="login-lead">Ton nom, ton mot de passe. Pas besoin de licence fédérale.</p>
+  <form class="stack-form" method="post" action="/login" data-participant-login>
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% endif %}
+    <label class="field">
+      <span>Ton nom</span>
+      {% set chosen_name = request.form.get('name', request.args.get('name', '')) %}
+      <input name="name" autocomplete="username" autocapitalize="words" required {% if not chosen_name %}autofocus{% endif %} placeholder="Ex. Barbs" value="{{ chosen_name }}">
+    </label>
+    <label class="field">
+      <span>Mot de passe</span>
+      <input type="password" name="password" autocomplete="current-password" required {% if chosen_name %}autofocus{% endif %}>
+    </label>
+    {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+    <button class="button button-primary button-wide" type="submit">Entrer <span aria-hidden="true">→</span></button>
+  </form>
+</section>
+{% endblock %}

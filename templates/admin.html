@@ -7,7 +7,7 @@
 {% endblock %}
 
 {% block content %}
-<section class="admin-shell" data-admin-app>
+<section class="admin-shell" data-admin-app data-site-logo-url="{{ site_logo_url | default('', true) }}" data-mail-mode="{{ config.MAIL_MODE }}">
   <header class="admin-heading">
     <div><p class="eyebrow">Administration</p><h1>Tableau de bord</h1></div>
     <button class="button button-primary" type="button" data-open-create>+ Ajouter</button>
@@ -18,6 +18,9 @@
     <button type="button" aria-selected="false" data-tab="participants">Participants</button>
     <button type="button" aria-selected="false" data-tab="questions">Questions</button>
     <button type="button" aria-selected="false" data-tab="answers">Réponses</button>
+    <button type="button" aria-selected="false" data-tab="revelations">Révélations</button>
+    <button type="button" aria-selected="false" data-tab="sent">Historique envoyé</button>
+    <button type="button" aria-selected="false" data-tab="phrases">Phrases d'intro</button>
     <button type="button" aria-selected="false" data-tab="feedback">Messages</button>
   </nav>
 
@@ -75,7 +78,37 @@
       <label><span>Question</span><select name="question_id"><option value="">Toutes</option></select></label>
       <button class="button button-secondary button-small" type="submit">Filtrer</button>
     </form>
+    <form class="admin-card import-strip" data-answer-import>
+      <div><strong>Importer un nouvel export</strong><small>L'import peut être rejoué : les doublons seront ignorés.</small></div>
+      <label class="button button-secondary button-small file-button">Choisir le JSON<input type="file" name="file" accept="application/json,.json" required></label>
+      <button class="button button-primary button-small" type="submit">Importer</button>
+      <span data-import-status role="status"></span>
+    </form>
     <div class="answer-list" data-answer-list><div class="admin-card loading-row">Chargement…</div></div>
+  </section>
+
+  <section class="admin-panel" data-panel="revelations" hidden>
+    <div class="panel-toolbar">
+      <div><p class="eyebrow">Une personne, une carte</p><h2>Les 10 prochains mails</h2><p>Chaque proposition reste un brouillon jusqu'au clic sur « Accepter et envoyer ».</p><p class="blocking-note" role="status">{% if config.MAIL_MODE == 'gmail' %}Envoi réel Gmail actif : le clic expédie immédiatement le message.{% else %}Simulation réservée aux tests automatisés.{% endif %}</p></div>
+      <button class="button button-secondary button-small" type="button" data-reload-revelations>Recharger</button>
+    </div>
+    <div class="review-summary" data-review-summary aria-live="polite"></div>
+    <div class="revelation-review-grid" data-revelation-review-grid><div class="admin-card loading-row">Chargement…</div></div>
+  </section>
+
+  <section class="admin-panel" data-panel="sent" hidden>
+    <div class="panel-toolbar"><div><p class="eyebrow">Copie figée</p><h2>Historique envoyé</h2><p>Ce contenu est exactement celui reçu par les participants.</p></div></div>
+    <div class="sent-history" data-sent-history><div class="admin-card loading-row">Chargement…</div></div>
+    <div class="panel-toolbar replies-admin-heading"><div><p class="eyebrow">Sans validation</p><h2>Réponses aux révélations</h2><p>Les réponses uniques envoyées directement à leur auteur.</p></div></div>
+    <div class="received-replies" data-admin-replies><div class="admin-card loading-row">Chargement…</div></div>
+  </section>
+
+  <section class="admin-panel" data-panel="phrases" hidden>
+    <div class="panel-toolbar">
+      <div><p class="eyebrow">La petite mise en bouche</p><h2>Phrases d'introduction</h2><p>Deux tons simples : pique ou positif.</p></div>
+      <button class="button button-primary button-small" type="button" data-add-intro>+ Ajouter</button>
+    </div>
+    <div class="intro-phrase-columns" data-intro-phrases><div class="admin-card loading-row">Chargement…</div></div>
   </section>
 
   <section class="admin-panel" data-panel="feedback" hidden>
@@ -90,11 +123,12 @@
     <input type="hidden" name="id"><input type="hidden" name="entity">
     <div data-participant-fields>
       <label class="field"><span>Nom affiché</span><input name="display_name" required></label>
+      <label class="field"><span>Adresse email</span><input type="email" name="email" autocomplete="off" placeholder="nom@exemple.fr"></label>
       <div class="image-field-grid">
         <label class="image-upload-field"><span>Photo de choix</span><small>Grande photo affichée sur l'accueil</small><span class="upload-preview upload-preview-large" data-preview="choice_photo_url"></span><span class="button button-secondary button-small file-button">Choisir<input type="file" name="choice_photo_file" accept="image/png,image/jpeg,image/webp,image/gif"></span><input type="hidden" name="choice_photo_url"></label>
         <label class="image-upload-field"><span>Photo de profil</span><small>Petite photo du questionnaire</small><span class="upload-preview upload-preview-profile" data-preview="profile_photo_url"></span><span class="button button-secondary button-small file-button">Choisir<input type="file" name="profile_photo_file" accept="image/png,image/jpeg,image/webp,image/gif"></span><input type="hidden" name="profile_photo_url"></label>
       </div>
-      <label class="field"><span>Code secret <small>(facultatif)</small></span><input name="secret_code"></label>
+      <label class="field"><span>Code secret <small>(ancien questionnaire)</small></span><input name="secret_code"></label>
     </div>
     <div data-question-fields hidden>
       <label class="field"><span>Titre interne</span><input name="title"></label>
@@ -109,6 +143,36 @@
     <button class="button button-primary button-wide" type="submit">Enregistrer</button>
   </form>
 </dialog>
+
+<dialog class="admin-dialog mail-dialog" data-mail-dialog>
+  <form method="dialog" class="dialog-head"><div><p class="eyebrow">Aperçu avant envoi</p><h2 data-mail-dialog-title>Révélation</h2></div><button class="icon-button" value="cancel" aria-label="Fermer">×</button></form>
+  <form class="stack-form" data-mail-edit-form>
+    <input type="hidden" name="id">
+    <label class="field"><span>Phrase d'introduction</span><textarea name="intro" rows="2" required></textarea></label>
+    <label class="field"><span>Contenu final</span><textarea name="finalContent" rows="7" required></textarea><small>La réponse originale n'est jamais modifiée.</small></label>
+    <div class="mail-preview-frame" data-mail-full-preview></div>
+    <div class="dialog-actions"><button class="button button-secondary" type="submit">Enregistrer le brouillon</button><button class="button button-primary" type="button" data-send-from-dialog>Accepter et envoyer</button></div>
+    <p class="form-error" data-mail-error role="alert" hidden></p>
+  </form>
+</dialog>
+
+<dialog class="admin-dialog decision-dialog" data-refresh-dialog>
+  <form method="dialog" class="dialog-head"><div><p class="eyebrow">Changer cette proposition</p><h2>Qu'est-ce qu'on en fait&nbsp;?</h2></div><button class="icon-button" value="cancel" aria-label="Fermer">×</button></form>
+  <div class="decision-actions">
+    <button class="button button-secondary" type="button" data-refresh-action="later"><strong>Remettre plus tard</strong><small>Elle pourra revenir dans un prochain tirage.</small></button>
+    <button class="button button-danger" type="button" data-refresh-action="reject"><strong>Rejeter</strong><small>Elle ne sera jamais proposée à nouveau.</small></button>
+  </div>
+</dialog>
+
+<dialog class="admin-dialog compact-dialog" data-intro-dialog>
+  <form method="dialog" class="dialog-head"><div><p class="eyebrow">Phrase d'introduction</p><h2 data-intro-dialog-title>Ajouter</h2></div><button class="icon-button" value="cancel" aria-label="Fermer">×</button></form>
+  <form class="stack-form" data-intro-form><input type="hidden" name="id"><label class="field"><span>Texte</span><textarea name="text" rows="3" maxlength="300" required></textarea></label><label class="field"><span>Ton</span><select name="tone"><option value="pique">Pique</option><option value="positif">Positif</option></select></label><button class="button button-primary" type="submit">Enregistrer</button></form>
+</dialog>
+
+<dialog class="admin-dialog compact-dialog" data-password-dialog>
+  <form method="dialog" class="dialog-head"><div><p class="eyebrow">Compte participant</p><h2 data-password-title>Mot de passe</h2></div><button class="icon-button" value="cancel" aria-label="Fermer">×</button></form>
+  <form class="stack-form" data-admin-password-form><input type="hidden" name="participantId"><label class="field"><span>Nouveau mot de passe</span><input type="password" name="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><button class="button button-primary" type="submit">Définir le mot de passe</button><p class="form-note" data-admin-password-status role="status"></p></form>
+</dialog>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script>{% endblock %}

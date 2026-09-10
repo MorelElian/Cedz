@@ -10,3 +10,6 @@ instance/*.sqlite3-*
 instance/uploads/
 SFB-ak47_1.mp3
 cedz_weapons_overlay_alpha.webp
+answers/
+mails.csv
+mails.txt
