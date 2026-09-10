@@ -89,7 +89,7 @@
 
   <section class="admin-panel" data-panel="revelations" hidden>
     <div class="panel-toolbar">
-      <div><p class="eyebrow">Une personne, une carte</p><h2>Les 10 prochains mails</h2><p>Chaque proposition reste un brouillon jusqu'au clic sur « Accepter et envoyer ».</p><p class="blocking-note" role="status">{% if config.MAIL_MODE == 'gmail' %}Envoi réel Gmail actif : le clic expédie immédiatement le message.{% else %}Simulation réservée aux tests automatisés.{% endif %}</p></div>
+      <div><p class="eyebrow">Une personne, une carte</p><h2>Les 10 prochains mails</h2><p>Chaque proposition reste un brouillon jusqu'au clic sur « Accepter et envoyer ».</p><p class="blocking-note" role="status">{% if config.MAIL_MODE == 'gmail_api' %}Envoi réel via l’API Gmail actif : le clic expédie immédiatement le message.{% elif config.MAIL_MODE == 'gmail' %}Envoi réel Gmail SMTP actif : le clic expédie immédiatement le message.{% else %}Simulation réservée aux tests automatisés.{% endif %}</p></div>
       <button class="button button-secondary button-small" type="button" data-reload-revelations>Recharger</button>
     </div>
     <div class="review-summary" data-review-summary aria-live="polite"></div>

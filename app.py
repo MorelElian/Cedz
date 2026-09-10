@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import base64
 import hashlib
 import html
 import io
@@ -18,6 +19,9 @@ from functools import wraps
 from itertools import combinations
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -207,7 +211,13 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         SMTP_PORT=int(os.environ.get("T24_SMTP_PORT", "587")),
         SMTP_USERNAME=os.environ.get("T24_SMTP_USER", ""),
         SMTP_PASSWORD=os.environ.get("T24_SMTP_PASSWORD", ""),
-        MAIL_FROM=os.environ.get("T24_MAIL_FROM", os.environ.get("T24_SMTP_USER", "")),
+        GMAIL_CLIENT_ID=os.environ.get("T24_GMAIL_CLIENT_ID", ""),
+        GMAIL_CLIENT_SECRET=os.environ.get("T24_GMAIL_CLIENT_SECRET", ""),
+        GMAIL_REFRESH_TOKEN=os.environ.get("T24_GMAIL_REFRESH_TOKEN", ""),
+        GMAIL_USER=os.environ.get("T24_GMAIL_USER", ""),
+        MAIL_FROM=os.environ.get(
+            "T24_MAIL_FROM", os.environ.get("T24_GMAIL_USER", os.environ.get("T24_SMTP_USER", ""))
+        ),
         PUBLIC_BASE_URL=os.environ.get("T24_PUBLIC_BASE_URL", "").strip().rstrip("/"),
         SMTP_TIMEOUT=20,
         MAX_CONTENT_LENGTH=6_000_000,
@@ -219,8 +229,8 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         app.config.update(config)
     if app.config["TESTING"] and not (config and "MAIL_MODE" in config):
         app.config["MAIL_MODE"] = "simulate"
-    if app.config["MAIL_MODE"] not in {"simulate", "gmail"}:
-        raise RuntimeError("T24_MAIL_MODE doit valoir 'simulate' ou 'gmail'.")
+    if app.config["MAIL_MODE"] not in {"simulate", "gmail", "gmail_api"}:
+        raise RuntimeError("T24_MAIL_MODE doit valoir 'simulate', 'gmail' ou 'gmail_api'.")
     if os.environ.get("T24_ENV") == "production":
         if app.config["SECRET_KEY"] == "local-dev-change-me" or app.config["ADMIN_PASSWORD"] == "t24-admin":
             raise RuntimeError("T24_SECRET_KEY et T24_ADMIN_PASSWORD doivent être définis en production.")
@@ -1685,14 +1695,11 @@ def deliver_email(recipient: str, subject: str, html_body: str) -> str:
     if mode == "simulate":
         return "simulated"
 
-    username = str(current_app.config["SMTP_USERNAME"]).strip()
-    password = str(current_app.config["SMTP_PASSWORD"])
     sender = str(current_app.config["MAIL_FROM"]).strip()
     sender_address = parseaddr(sender)[1]
-    if (not EMAIL_RE.fullmatch(recipient) or not EMAIL_RE.fullmatch(username)
-            or not EMAIL_RE.fullmatch(sender_address) or not password
+    if (not EMAIL_RE.fullmatch(recipient) or not EMAIL_RE.fullmatch(sender_address)
             or any(char in subject + sender + recipient for char in "\r\n")):
-        raise MailDeliveryError("Configuration Gmail incomplète ou invalide.")
+        raise MailDeliveryError("Adresse Gmail ou destinataire invalide.")
 
     message = EmailMessage()
     message["From"] = sender
@@ -1703,6 +1710,57 @@ def deliver_email(recipient: str, subject: str, html_body: str) -> str:
     text_body = re.sub(r"\s+", " ", html.unescape(text_body)).strip()
     message.set_content(text_body)
     message.add_alternative(html_body, subtype="html")
+
+    if mode == "gmail_api":
+        client_id = str(current_app.config["GMAIL_CLIENT_ID"]).strip()
+        client_secret = str(current_app.config["GMAIL_CLIENT_SECRET"])
+        refresh_token = str(current_app.config["GMAIL_REFRESH_TOKEN"])
+        if not client_id or not client_secret or not refresh_token:
+            raise MailDeliveryError("Configuration OAuth Gmail incomplète.")
+        try:
+            token_request = Request(
+                "https://oauth2.googleapis.com/token",
+                data=urlencode({
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                }).encode(),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
+            )
+            with urlopen(token_request, timeout=float(current_app.config["SMTP_TIMEOUT"])) as response:
+                access_token = str(json.load(response).get("access_token", ""))
+            if not access_token:
+                raise ValueError("missing access token")
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode().rstrip("=")
+            send_request = Request(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+                data=json.dumps({"raw": raw_message}).encode(),
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with urlopen(send_request, timeout=float(current_app.config["SMTP_TIMEOUT"])) as response:
+                result = json.load(response)
+            if not result.get("id"):
+                raise ValueError("missing Gmail message id")
+        except (HTTPError, URLError, OSError, ValueError, TypeError, AttributeError) as exc:
+            http_status = getattr(exc, "code", None)
+            current_app.logger.warning(
+                "Gmail API delivery failed: %s%s",
+                type(exc).__name__,
+                f" (HTTP {http_status})" if http_status else "",
+            )
+            raise MailDeliveryError("L’API Gmail a refusé ou interrompu l’envoi.") from exc
+        return "gmail_api"
+
+    username = str(current_app.config["SMTP_USERNAME"]).strip()
+    password = str(current_app.config["SMTP_PASSWORD"])
+    if not EMAIL_RE.fullmatch(username) or not password:
+        raise MailDeliveryError("Configuration SMTP Gmail incomplète.")
 
     try:
         context = ssl.create_default_context()

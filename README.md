@@ -78,16 +78,37 @@ export T24_ADMIN_PASSWORD="un-mot-de-passe-solide"
 export T24_SECURE_COOKIE=1
 export T24_ENV=production
 export T24_DATABASE="/chemin/persistant/t24.sqlite3"
-export T24_MAIL_MODE="gmail"
-export T24_SMTP_USER="cedzt24@gmail.com"
-export T24_SMTP_PASSWORD="mot-de-passe-application-Google"
+export T24_MAIL_MODE="gmail_api"
+export T24_GMAIL_USER="cedzt24@gmail.com"
+export T24_GMAIL_CLIENT_ID="client OAuth Google"
+export T24_GMAIL_CLIENT_SECRET="secret OAuth Google"
+export T24_GMAIL_REFRESH_TOKEN="refresh token OAuth Google"
 export T24_MAIL_FROM="Cedz Are Shooting <cedzt24@gmail.com>"
 export T24_PUBLIC_BASE_URL="https://cedz-production.up.railway.app"
 ```
 
-Pour démarrer en local sans écrire le secret Gmail sur disque, utiliser
-`./scripts/run_local_gmail.sh` : le mot de passe d'application est demandé à
-chaque lancement et reste uniquement en mémoire.
+Le mode historique `gmail` utilise SMTP et reste disponible pour les essais
+locaux. En production Railway Hobby, utiliser `gmail_api`, qui communique avec
+Google exclusivement en HTTPS.
+
+### Obtenir les identifiants Gmail API
+
+1. Créer un projet dans Google Cloud Console et activer **Gmail API**.
+2. Configurer l'écran de consentement OAuth en **External**, avec
+   `cedzt24@gmail.com` comme utilisateur de test.
+3. Ajouter uniquement le scope
+   `https://www.googleapis.com/auth/gmail.send`.
+4. Créer un client OAuth **Web application** et ajouter l'URI de redirection
+   `https://developers.google.com/oauthplayground`.
+5. Dans Google OAuth 2.0 Playground, ouvrir les réglages, activer **Use your own
+   OAuth credentials**, puis renseigner le client ID et le client secret.
+6. Autoriser le scope `gmail.send` avec `cedzt24@gmail.com`, échanger le code,
+   puis copier le `refresh_token` dans Railway.
+
+Un projet OAuth laissé en statut **Testing** produit un refresh token qui expire
+au bout de sept jours. Avant de générer le jeton définitif, passer l'application
+OAuth en **In production**. Les trois valeurs OAuth sont des secrets : ne jamais
+les mettre dans Git, un fichier `.env` commité ou une capture d'écran.
 
 Le téléphone participant est facultatif. Les réponses ne sont jamais exposées
 par les routes publiques ; seule une session admin permet de les lire/exporter.
@@ -133,9 +154,11 @@ augmente nettement.
    - `T24_UPLOAD_FOLDER=/app/storage/uploads`
    - `T24_SECRET_KEY` avec une longue valeur aléatoire
    - `T24_ADMIN_PASSWORD` avec un mot de passe administrateur solide
-   - `T24_MAIL_MODE=gmail`
-   - `T24_SMTP_USER=cedzt24@gmail.com`
-   - `T24_SMTP_PASSWORD` avec le mot de passe d'application Google
+   - `T24_MAIL_MODE=gmail_api`
+   - `T24_GMAIL_USER=cedzt24@gmail.com`
+   - `T24_GMAIL_CLIENT_ID` avec l'identifiant du client OAuth
+   - `T24_GMAIL_CLIENT_SECRET` avec le secret du client OAuth
+   - `T24_GMAIL_REFRESH_TOKEN` avec le refresh token OAuth
    - `T24_MAIL_FROM=Cedz Are Shooting <cedzt24@gmail.com>`
    - `T24_PUBLIC_BASE_URL=https://cedz-production.up.railway.app`
 5. Dans **Settings → Deploy**, définir le healthcheck sur `/health`.

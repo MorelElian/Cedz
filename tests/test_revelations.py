@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 import sqlite3
 
@@ -95,6 +97,53 @@ def test_gmail_transport_uses_starttls_without_exposing_credentials(app, monkeyp
     app.config["SMTP_PASSWORD"] = ""
     with app.app_context(), pytest.raises(MailDeliveryError, match="incomplète"):
         deliver_email("sender@gmail.com", "Test Cedz", "<p>Non.</p>")
+
+
+def test_gmail_api_refreshes_token_and_sends_mime_message(app, monkeypatch):
+    requests = []
+    responses = [
+        {"access_token": "temporary-access-token", "expires_in": 3600},
+        {"id": "gmail-message-id", "threadId": "gmail-thread-id"},
+    ]
+
+    class FakeResponse(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            self.close()
+
+    def fake_urlopen(request, timeout):
+        requests.append((request, timeout))
+        return FakeResponse(json.dumps(responses[len(requests) - 1]).encode())
+
+    monkeypatch.setattr("app.urlopen", fake_urlopen)
+    app.config.update(
+        MAIL_MODE="gmail_api",
+        MAIL_FROM="Cedz Are Shooting <cedzt24@gmail.com>",
+        GMAIL_CLIENT_ID="oauth-client-id",
+        GMAIL_CLIENT_SECRET="oauth-client-secret",
+        GMAIL_REFRESH_TOKEN="oauth-refresh-token",
+    )
+    with app.app_context():
+        assert deliver_email(
+            "participant@example.fr", "Une révélation", "<p style='color:#17213a'>Salut.</p>"
+        ) == "gmail_api"
+
+    token_request, send_request = requests[0][0], requests[1][0]
+    assert token_request.full_url == "https://oauth2.googleapis.com/token"
+    assert b"grant_type=refresh_token" in token_request.data
+    assert b"oauth-refresh-token" in token_request.data
+    assert send_request.full_url.endswith("/gmail/v1/users/me/messages/send")
+    assert send_request.get_header("Authorization") == "Bearer temporary-access-token"
+    raw = json.loads(send_request.data)["raw"]
+    decoded = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)).decode(errors="replace")
+    assert "participant@example.fr" in decoded
+    assert "Salut." in decoded
+
+    app.config["GMAIL_REFRESH_TOKEN"] = ""
+    with app.app_context(), pytest.raises(MailDeliveryError, match="OAuth Gmail incomplète"):
+        deliver_email("participant@example.fr", "Test", "<p>Non.</p>")
 
 
 def test_intro_phrase_catalog_migrates_existing_database_once(tmp_path):
