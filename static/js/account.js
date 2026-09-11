@@ -80,7 +80,14 @@
   function renderReplies(replies) {
     const root = app.querySelector('[data-replies-received]');
     if (!replies.length) { root.innerHTML = '<div class="empty-state compact-empty"><strong>Aucun retour pour l’instant.</strong><p>Ils cherchent sûrement leurs mots.</p></div>'; return; }
-    root.innerHTML = replies.map(reply => `<article class="received-reply"><header><strong>${esc(pick(reply, 'from_participant', 'fromParticipant', 'authorName', 'author_name') || 'Un participant')}</strong><time>${esc(formatDate(pick(reply, 'created_at', 'createdAt') || ''))}</time></header><blockquote>${esc(pick(reply, 'message', 'content') || '—')}</blockquote></article>`).join('');
+    root.innerHTML = replies.map(reply => {
+      const sender = pick(reply, 'from_participant', 'fromParticipant', 'authorName', 'author_name') || 'Un participant';
+      const question = pick(reply, 'original_question', 'originalQuestion') || '';
+      const original = pick(reply, 'original_message', 'originalMessage') || '';
+      return `<article class="received-reply"><header><strong>${esc(sender)}</strong><time>${esc(formatDate(pick(reply, 'created_at', 'createdAt') || ''))}</time></header>
+        <div class="reply-context"><small>Ton message auquel ${esc(sender)} répond</small>${question ? `<p>${esc(question)}</p>` : ''}<div>${esc(original || 'Message d’origine indisponible.')}</div></div>
+        <small class="reply-answer-label">Sa réponse</small><blockquote>${esc(pick(reply, 'message', 'content') || '—')}</blockquote></article>`;
+    }).join('');
   }
 
   async function load() {

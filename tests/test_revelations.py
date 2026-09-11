@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from app import DEFAULT_INTRO_PHRASES, MailDeliveryError, create_app, deliver_email
+from app import DEFAULT_INTRO_PHRASES, MailDeliveryError, choose_intro, create_app, deliver_email
 
 
 @pytest.fixture()
@@ -296,6 +296,72 @@ def test_login_rejects_external_next_redirect(client):
     assert response.get_json()["redirectUrl"] in {"/compte", "/mon-compte"}
 
 
+def test_participant_can_change_password_and_old_password_stops_working(client):
+    csrf = admin_login(client)
+    participant = client.get("/api/admin/participants").get_json()["participants"][0]
+    set_password(client, csrf, participant["id"], "ancien-pass")
+    assert client.post("/admin/logout", data={"csrf_token": csrf["X-CSRF-Token"]}).status_code == 302
+
+    account_csrf = participant_login(client, participant["displayName"], "ancien-pass")
+    assert client.patch(
+        "/api/account/password",
+        json={"currentPassword": "incorrect", "newPassword": "nouveau-pass"},
+        headers=account_csrf,
+    ).status_code == 403
+    changed = client.patch(
+        "/api/account/password",
+        json={"currentPassword": "ancien-pass", "newPassword": "nouveau-pass"},
+        headers=account_csrf,
+    )
+    assert changed.status_code == 200
+    assert client.post("/logout", headers=account_csrf).status_code == 302
+    assert client.post(
+        "/login", json={"name": participant["displayName"], "password": "ancien-pass"}
+    ).status_code == 401
+    assert client.post(
+        "/login", json={"name": participant["displayName"], "password": "nouveau-pass"}
+    ).status_code == 200
+
+
+def test_intro_phrase_is_random_among_least_used_choices(app, monkeypatch):
+    seen = []
+
+    class PickLast:
+        def choice(self, values):
+            seen.extend(values)
+            return values[-1]
+
+    monkeypatch.setattr("app.secrets.SystemRandom", PickLast)
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        participant_id = db.execute("SELECT MIN(id) FROM participants WHERE is_active=1").fetchone()[0]
+        expected_id = db.execute(
+            "SELECT MAX(id) FROM intro_phrases WHERE is_active=1 AND tone='pique'"
+        ).fetchone()[0]
+    with app.app_context():
+        chosen = choose_intro({"recipient_participant_id": participant_id, "tone": "pique"})
+    assert len(seen) > 1
+    assert chosen["id"] == expected_id
+
+
+def test_review_rerolls_automatic_intro_but_preserves_admin_edit(client, monkeypatch):
+    csrf = admin_login(client)
+    first = client.get("/api/admin/revelations/review").get_json()["revelations"]
+    edited = first[0]
+    assert client.patch(
+        f"/api/admin/revelations/{edited['id']}",
+        json={"intro": "Texte choisi manuellement", "finalContent": edited["finalContent"]},
+        headers=csrf,
+    ).status_code == 200
+    monkeypatch.setattr("app.choose_intro", lambda _: {"id": None, "text": "Nouveau tirage automatique"})
+    reloaded = client.get("/api/admin/revelations/review").get_json()["revelations"]
+    by_id = {card["id"]: card for card in reloaded}
+    assert by_id[edited["id"]]["intro"] == "Texte choisi manuellement"
+    assert all(
+        card["intro"] == "Nouveau tirage automatique"
+        for card in reloaded if card["id"] != edited["id"]
+    )
+
+
 def test_review_has_one_card_per_participant_and_refreshes_explicitly(client):
     csrf = admin_login(client)
     payload = client.get("/api/admin/revelations/review").get_json()
@@ -374,11 +440,16 @@ def test_send_calls_configured_delivery_then_is_idempotent_and_private(client, a
         json={"message": "Deuxième réponse."}, headers=account_csrf,
     ).status_code == 409
     participant_login(client, author["displayName"])
-    assert client.get("/api/account/dashboard").get_json()["repliesReceived"][0]["message"] == "Je prends note."
+    received_reply = client.get("/api/account/dashboard").get_json()["repliesReceived"][0]
+    assert received_reply["message"] == "Je prends note."
+    assert received_reply["original_question"] == card["question"]
+    assert received_reply["original_message"] == "<script>alert(1)</script>"
     assert client.get(f"/api/account/revelations/{card['id']}").status_code == 404
     admin_csrf = admin_login(client)
     replies = client.get("/api/admin/revelation-replies", headers=admin_csrf).get_json()["replies"]
     assert replies[0]["message"] == "Je prends note."
+    assert replies[0]["originalQuestion"] == card["question"]
+    assert replies[0]["originalMessage"] == "<script>alert(1)</script>"
 
 
 def test_failed_gmail_delivery_keeps_revelation_in_review(client, app, monkeypatch):
@@ -395,6 +466,47 @@ def test_failed_gmail_delivery_keeps_revelation_in_review(client, app, monkeypat
     assert response.status_code == 502
     remaining_ids = {item["id"] for item in client.get("/api/admin/revelations/review").get_json()["revelations"]}
     assert card["id"] in remaining_ids
+
+
+def test_bulk_send_continues_after_one_failure_and_skips_missing_email(client, app, monkeypatch):
+    csrf = admin_login(client)
+    cards = client.get("/api/admin/revelations/review").get_json()["revelations"]
+    ready = [card for card in cards if card["recipientEmail"]]
+    missing = [card for card in cards if not card["recipientEmail"]]
+    failed_email = ready[0]["recipientEmail"]
+    attempts = []
+
+    def fake_delivery(recipient, subject, html_body):
+        attempts.append(recipient)
+        if recipient == failed_email:
+            raise MailDeliveryError("refus simulé")
+        return "gmail_api"
+
+    app.config["MAIL_MODE"] = "gmail_api"
+    monkeypatch.setattr("app.deliver_email", fake_delivery)
+    assert client.post("/api/admin/revelations/send-active").status_code == 403
+    response = client.post("/api/admin/revelations/send-active", headers=csrf)
+    assert response.status_code == 200
+    result = response.get_json()
+    assert result["sentCount"] == len(ready) - 1
+    assert result["failedCount"] == 1
+    assert result["failed"][0]["recipientName"] == ready[0]["recipientName"]
+    assert result["failed"][0]["recipientEmail"] == failed_email
+    assert result["skippedCount"] == len(missing)
+    assert [item["recipientEmail"] for item in result["skipped"]] == [
+        card["recipientEmail"] for card in missing
+    ]
+    assert all(item["recipientEmail"] for item in result["sent"])
+    assert len(attempts) == len(ready)
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        failed_status = db.execute(
+            "SELECT status FROM revelations WHERE id=?", (ready[0]["id"],)
+        ).fetchone()[0]
+        sent_count = db.execute(
+            "SELECT COUNT(*) FROM revelations WHERE status='sent'"
+        ).fetchone()[0]
+    assert failed_status == "in_review"
+    assert sent_count == len(ready) - 1
 
 
 def test_rov_without_email_blocks_send_and_multi_person_answers_fan_out(client, app):

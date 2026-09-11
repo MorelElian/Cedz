@@ -1780,15 +1780,19 @@ def deliver_email(recipient: str, subject: str, html_body: str) -> str:
 
 
 def choose_intro(revelation: sqlite3.Row) -> sqlite3.Row | None:
-    return _db().execute(
+    rows = _db().execute(
         """SELECT ip.*, COALESCE(piu.use_count, 0) use_count
            FROM intro_phrases ip
            LEFT JOIN participant_intro_usage piu
              ON piu.intro_phrase_id = ip.id AND piu.participant_id = ?
            WHERE ip.is_active = 1 AND ip.tone = ?
-           ORDER BY COALESCE(piu.use_count, 0), ip.id LIMIT 1""",
+           ORDER BY ip.id""",
         (revelation["recipient_participant_id"], revelation["tone"]),
-    ).fetchone()
+    ).fetchall()
+    if not rows:
+        return None
+    least_used = min(row["use_count"] for row in rows)
+    return secrets.SystemRandom().choice([row for row in rows if row["use_count"] == least_used])
 
 
 def revelation_payload(row: sqlite3.Row, *, admin: bool = False) -> dict[str, Any]:
@@ -1825,6 +1829,33 @@ def revelation_query(where: str = "") -> str:
               JOIN participants author ON author.id = r.author_participant_id""" + where
 
 
+def deliver_revelation(row: sqlite3.Row) -> dict[str, Any]:
+    """Send and persist one validated in-review revelation in the current transaction."""
+    db = _db()
+    content = row["final_content"] or format_revelation_content(row)
+    subject = f"Cedz — une révélation pour {json.loads(row['content_json'])['recipient']}"
+    html_snapshot = render_revelation_email(row, content)
+    delivery_mode = deliver_email(row["recipient_email"], subject, html_snapshot)
+    now = utcnow()
+    db.execute(
+        """UPDATE revelations SET status='sent', subject_snapshot=?, html_snapshot=?,
+           content_snapshot=?, recipient_email_snapshot=?, sent_at=?, updated_at=? WHERE id=?""",
+        (subject, html_snapshot, content, row["recipient_email"], now, now, row["id"]),
+    )
+    if row["intro_phrase_id"]:
+        db.execute(
+            """INSERT INTO participant_intro_usage(participant_id, intro_phrase_id, use_count, last_used_at)
+               VALUES (?, ?, 1, ?) ON CONFLICT(participant_id, intro_phrase_id) DO UPDATE SET
+               use_count=use_count+1, last_used_at=excluded.last_used_at""",
+            (row["recipient_participant_id"], row["intro_phrase_id"], now),
+        )
+    db.commit()
+    sent = db.execute(revelation_query(" WHERE r.id=?"), (row["id"],)).fetchone()
+    payload = revelation_payload(sent, admin=True)
+    payload["deliveryMode"] = delivery_mode
+    return payload
+
+
 def select_review_candidate(participant_id: int, exclude_id: int | None = None) -> sqlite3.Row | None:
     db = _db()
     current = db.execute(
@@ -1832,6 +1863,15 @@ def select_review_candidate(participant_id: int, exclude_id: int | None = None) 
         (participant_id,),
     ).fetchone()
     if current and current["id"] != exclude_id:
+        if not current["admin_edited"]:
+            intro = choose_intro(current)
+            db.execute(
+                "UPDATE revelations SET intro_phrase_id=?, intro_text=?, updated_at=? WHERE id=?",
+                (intro["id"] if intro else None, intro["text"] if intro else "On a parlé de toi.",
+                 utcnow(), current["id"]),
+            )
+            db.commit()
+            current = db.execute(revelation_query(" WHERE r.id=?"), (current["id"],)).fetchone()
         return current
     last = db.execute(
         "SELECT question_type FROM revelations WHERE recipient_participant_id=? AND status='sent' ORDER BY sent_at DESC LIMIT 1",
@@ -1848,7 +1888,9 @@ def select_review_candidate(participant_id: int, exclude_id: int | None = None) 
     chosen = secrets.SystemRandom().choice(different or rows)
     intro = choose_intro(chosen)
     db.execute(
-        """UPDATE revelations SET status='in_review', intro_phrase_id=?, intro_text=COALESCE(intro_text, ?),
+        """UPDATE revelations SET status='in_review',
+           intro_phrase_id=CASE WHEN admin_edited=1 THEN intro_phrase_id ELSE ? END,
+           intro_text=CASE WHEN admin_edited=1 THEN intro_text ELSE ? END,
            final_content=COALESCE(final_content, ?), updated_at=? WHERE id=?""",
         (intro["id"] if intro else None, intro["text"] if intro else "On a parlé de toi.",
          format_revelation_content(chosen), utcnow(), chosen["id"]),
@@ -1890,12 +1932,24 @@ def register_account_api(app: Flask) -> None:
         ranking_stats = [{"discipline": key, "averagePosition": round(sum(values) / len(values), 2), "revealedCount": len(values)}
                          for key, values in sorted(ranking_values.items())]
         reply_rows = db.execute(
-            """SELECT rr.message, rr.created_at, r.id revelation_id, p.display_name from_participant
+            """SELECT rr.message, rr.created_at, r.id revelation_id, p.display_name from_participant,
+                      r.content_json, r.content_snapshot, r.final_content
                FROM revelation_replies rr JOIN revelations r ON r.id=rr.revelation_id
                JOIN participants p ON p.id=rr.participant_id
                WHERE r.author_participant_id=? AND r.status='sent' ORDER BY rr.created_at DESC""",
             (participant["id"],),
         ).fetchall()
+        replies_received = []
+        for row in reply_rows:
+            content = json.loads(row["content_json"])
+            replies_received.append({
+                "message": row["message"],
+                "created_at": row["created_at"],
+                "revelation_id": row["revelation_id"],
+                "from_participant": row["from_participant"],
+                "original_question": content.get("question", ""),
+                "original_message": row["content_snapshot"] or row["final_content"] or "",
+            })
         answer_session = db.execute(
             "SELECT id, status FROM answer_sessions WHERE participant_id=? ORDER BY created_at LIMIT 1",
             (participant["id"],),
@@ -1918,7 +1972,7 @@ def register_account_api(app: Flask) -> None:
             "csrfToken": csrf_token(), "participant": participant_payload(participant),
             "questionnaire": questionnaire_payload,
             "answers": own_answers, "revelations": received, "rankingStats": ranking_stats, "rankings": ranking_stats,
-            "repliesReceived": [dict(row) for row in reply_rows],
+            "repliesReceived": replies_received,
         })
 
     @app.get("/api/account/revelations/<int:revelation_id>")
@@ -2252,17 +2306,24 @@ def register_admin_api(app: Flask) -> None:
         rows = _db().execute(
             """SELECT rr.id,rr.revelation_id,rr.message,rr.created_at,
                       recipient.id participant_id,recipient.display_name participant_name,
-                      author.id author_id,author.display_name author_name
+                      author.id author_id,author.display_name author_name,
+                      r.content_json,r.content_snapshot,r.final_content
                FROM revelation_replies rr JOIN revelations r ON r.id=rr.revelation_id
                JOIN participants recipient ON recipient.id=rr.participant_id
                JOIN participants author ON author.id=r.author_participant_id
                ORDER BY rr.created_at DESC"""
         ).fetchall()
-        return jsonify({"replies": [{
-            "id": row["id"], "revelationId": row["revelation_id"], "message": row["message"],
-            "participantId": row["participant_id"], "participantName": row["participant_name"],
-            "authorId": row["author_id"], "authorName": row["author_name"], "createdAt": row["created_at"],
-        } for row in rows]})
+        replies = []
+        for row in rows:
+            content = json.loads(row["content_json"])
+            replies.append({
+                "id": row["id"], "revelationId": row["revelation_id"], "message": row["message"],
+                "participantId": row["participant_id"], "participantName": row["participant_name"],
+                "authorId": row["author_id"], "authorName": row["author_name"], "createdAt": row["created_at"],
+                "originalQuestion": content.get("question", ""),
+                "originalMessage": row["content_snapshot"] or row["final_content"] or "",
+            })
+        return jsonify({"replies": replies})
 
     @app.patch("/api/admin/revelations/<int:revelation_id>")
     @admin_required
@@ -2312,33 +2373,54 @@ def register_admin_api(app: Flask) -> None:
             abort_json(409, "Cette révélation n'est pas en review.")
         if not row["recipient_email"] or not EMAIL_RE.fullmatch(row["recipient_email"]):
             abort_json(409, "Ajoute une adresse email valide au participant avant l'envoi.")
-        intro = row["intro_text"] or "On a parlé de toi."
-        content = row["final_content"] or format_revelation_content(row)
-        subject = f"Cedz — une révélation pour {json.loads(row['content_json'])['recipient']}"
-        html_snapshot = render_revelation_email(row, content)
         try:
-            delivery_mode = deliver_email(row["recipient_email"], subject, html_snapshot)
+            payload = deliver_revelation(row)
         except MailDeliveryError:
             db.rollback()
             abort_json(502, "L’envoi Gmail a échoué. La révélation reste prête à être renvoyée.")
-        now = utcnow()
-        db.execute(
-            """UPDATE revelations SET status='sent', subject_snapshot=?, html_snapshot=?,
-               content_snapshot=?, recipient_email_snapshot=?, sent_at=?, updated_at=? WHERE id=?""",
-            (subject, html_snapshot, content, row["recipient_email"], now, now, revelation_id),
-        )
-        if row["intro_phrase_id"]:
-            db.execute(
-                """INSERT INTO participant_intro_usage(participant_id, intro_phrase_id, use_count, last_used_at)
-                   VALUES (?, ?, 1, ?) ON CONFLICT(participant_id, intro_phrase_id) DO UPDATE SET
-                   use_count=use_count+1, last_used_at=excluded.last_used_at""",
-                (row["recipient_participant_id"], row["intro_phrase_id"], now),
-            )
-        db.commit()
-        sent = db.execute(revelation_query(" WHERE r.id=?"), (revelation_id,)).fetchone()
-        payload = revelation_payload(sent, admin=True)
-        payload["deliveryMode"] = delivery_mode
         return jsonify(payload)
+
+    @app.post("/api/admin/revelations/send-active")
+    @admin_required
+    def admin_send_active_revelations():
+        db = _db()
+        rows = db.execute(
+            revelation_query(
+                " WHERE r.status='in_review' AND recipient.is_active=1 ORDER BY recipient.display_name, r.id"
+            )
+        ).fetchall()
+        sent, failed, skipped = [], [], []
+        for initial_row in rows:
+            if not initial_row["recipient_email"] or not EMAIL_RE.fullmatch(initial_row["recipient_email"]):
+                skipped.append({
+                    "id": initial_row["id"],
+                    "recipientName": initial_row["recipient_name"],
+                    "recipientEmail": initial_row["recipient_email"],
+                })
+                continue
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(revelation_query(" WHERE r.id=? AND r.status='in_review'"),
+                             (initial_row["id"],)).fetchone()
+            if not row:
+                db.rollback()
+                continue
+            try:
+                sent.append(deliver_revelation(row))
+            except MailDeliveryError:
+                db.rollback()
+                failed.append({
+                    "id": row["id"],
+                    "recipientName": row["recipient_name"],
+                    "recipientEmail": row["recipient_email"],
+                })
+        return jsonify({
+            "sent": sent,
+            "sentCount": len(sent),
+            "failed": failed,
+            "failedCount": len(failed),
+            "skipped": skipped,
+            "skippedCount": len(skipped),
+        })
 
     @app.get("/api/admin/intro-phrases")
     @admin_required

@@ -64,6 +64,13 @@
   function renderReview() {
     const grid = app.querySelector('[data-revelation-review-grid]');
     const summary = app.querySelector('[data-review-summary]');
+    const bulkButton = app.querySelector('[data-send-active-revelations]');
+    const readyCount = state.review.filter(item => {
+      const recipient = person(item, 'recipient');
+      return Boolean(pick(item, 'recipientEmail', 'recipient_email') || pick(recipient, 'email'));
+    }).length;
+    bulkButton.disabled = readyCount === 0;
+    bulkButton.textContent = readyCount ? `Envoyer les ${readyCount} mails prêts` : 'Aucun mail prêt';
     summary.textContent = `${state.review.length}/10 destinataires ont une proposition.`;
     if (!state.review.length) { grid.innerHTML = '<div class="admin-card empty-state"><strong>Aucune proposition disponible.</strong><p>Importe des réponses ou recharge le tirage.</p></div>'; return; }
     grid.innerHTML = state.review.map(item => {
@@ -95,6 +102,33 @@
     }).join('');
   }
 
+  function renderBulkSendSummary(result) {
+    const root = app.querySelector('[data-bulk-send-summary]');
+    const groups = [
+      { key: 'sent', label: 'Envoyés', icon: '✓', className: 'success', empty: 'Aucun mail envoyé' },
+      { key: 'failed', label: 'Échecs', icon: '×', className: 'failure', empty: 'Aucun échec' },
+      { key: 'skipped', label: 'Ignorés', icon: '—', className: 'skipped', empty: 'Aucun mail ignoré' },
+    ];
+    const total = Number(result.sentCount || 0) + Number(result.failedCount || 0) + Number(result.skippedCount || 0);
+    root.hidden = false;
+    root.innerHTML = `<header><div><p class="eyebrow">Résultat de l’envoi</p><strong>${total} destinataire${total > 1 ? 's' : ''} traité${total > 1 ? 's' : ''}</strong></div><small>Les échecs restent prêts à être renvoyés.</small></header>
+      <div class="bulk-send-groups">${groups.map(group => {
+        const items = Array.isArray(result[group.key]) ? result[group.key] : [];
+        return `<section class="bulk-send-group is-${group.className}"><h3><span aria-hidden="true">${group.icon}</span>${group.label}<b>${items.length}</b></h3>${items.length ? `<ul>${items.map(item => {
+          const recipient = person(item, 'recipient');
+          const name = pick(item, 'recipientName', 'recipient_name') || personName(recipient);
+          const email = pick(item, 'recipientEmail', 'recipient_email') || pick(recipient, 'email');
+          return `<li><strong>${esc(name)}</strong><small>${email ? esc(email) : 'Adresse email manquante'}</small></li>`;
+        }).join('')}</ul>` : `<p>${group.empty}</p>`}</section>`;
+      }).join('')}</div>`;
+  }
+
+  function renderBulkSendError(error) {
+    const root = app.querySelector('[data-bulk-send-summary]');
+    root.hidden = false;
+    root.innerHTML = `<div class="bulk-send-request-error" role="alert"><strong>Impossible de lancer l’envoi groupé.</strong><p>${esc(error.message)}</p></div>`;
+  }
+
   function renderPhrases() {
     const root = app.querySelector('[data-intro-phrases]');
     const tones = [['pique','Pique'],['positif','Positif']];
@@ -110,7 +144,15 @@
   function renderAdminReplies(items) {
     const root = app.querySelector('[data-admin-replies]');
     if (!items.length) { root.innerHTML = '<div class="admin-card empty-state"><strong>Aucune réponse reçue.</strong></div>'; return; }
-    root.innerHTML = items.map(item => `<article class="received-reply"><header><strong>${esc(pick(item,'fromParticipant','from_participant','participantName','participant_name') || 'Participant')}</strong><small>à ${esc(pick(item,'authorName','author_name','toParticipant','to_participant') || 'l’auteur')}</small><time>${esc(pick(item,'createdAt','created_at') || '')}</time></header><blockquote>${esc(pick(item,'message','content') || '—')}</blockquote></article>`).join('');
+    root.innerHTML = items.map(item => {
+      const sender = pick(item,'fromParticipant','from_participant','participantName','participant_name') || 'Participant';
+      const author = pick(item,'authorName','author_name','toParticipant','to_participant') || 'l’auteur';
+      const question = pick(item,'originalQuestion','original_question') || '';
+      const original = pick(item,'originalMessage','original_message') || '';
+      return `<article class="received-reply"><header><strong>${esc(sender)}</strong><small>à ${esc(author)}</small><time>${esc(pick(item,'createdAt','created_at') || '')}</time></header>
+        <div class="reply-context"><small>Message de ${esc(author)} auquel ${esc(sender)} répond</small>${question ? `<p>${esc(question)}</p>` : ''}<div>${esc(original || 'Message d’origine indisponible.')}</div></div>
+        <small class="reply-answer-label">Réponse de ${esc(sender)}</small><blockquote>${esc(pick(item,'message','content') || '—')}</blockquote></article>`;
+    }).join('');
   }
 
   async function loadReview() {
@@ -183,7 +225,6 @@
   const refreshDialog = document.querySelector('[data-refresh-dialog]');
   const introDialog = document.querySelector('[data-intro-dialog]');
   const introForm = introDialog.querySelector('[data-intro-form]');
-  const passwordDialog = document.querySelector('[data-password-dialog]');
 
   app.addEventListener('click', async event => {
     const button = event.target.closest('button'); if (!button) return;
@@ -195,15 +236,22 @@
       try { await sendMail(button.dataset.sendRevelation); }
       catch (error) { button.disabled = false; window.alert(error.message); }
     }
+    if (button.matches('[data-send-active-revelations]')) {
+      const count=state.review.filter(item=>{const recipient=person(item,'recipient');return Boolean(pick(item,'recipientEmail','recipient_email')||pick(recipient,'email'));}).length;
+      if(!count||!window.confirm(`Envoyer maintenant les ${count} mails prêts ?`))return;
+      button.disabled=true;button.textContent='Envoi en cours…';
+      const bulkSummary=app.querySelector('[data-bulk-send-summary]');
+      bulkSummary.hidden=false;bulkSummary.innerHTML='<div class="bulk-send-loading" role="status">Envoi en cours…</div>';
+      try{const result=await api('/api/admin/revelations/send-active',{method:'POST',body:'{}'});renderBulkSendSummary(result);await Promise.all([loadReview(),loadSent()]);}
+      catch(error){renderBulkSendError(error);renderReview();}
+      return;
+    }
     if (button.matches('[data-reload-revelations]')) loadReview();
     if (button.matches('[data-add-intro]')) { introForm.reset(); introForm.elements.id.value=''; introDialog.querySelector('[data-intro-dialog-title]').textContent='Ajouter'; introDialog.showModal(); }
     if (button.dataset.editIntro) {
       const item=state.phrases.find(phrase=>String(phrase.id)===button.dataset.editIntro); introForm.elements.id.value=item.id; introForm.elements.text.value=pick(item,'text','content'); introForm.elements.tone.value=item.tone==='positive'?'positif':item.tone; introDialog.querySelector('[data-intro-dialog-title]').textContent='Modifier'; introDialog.showModal();
     }
     if (button.dataset.deleteIntro && window.confirm('Supprimer cette phrase ?')) { try { await api(`/api/admin/intro-phrases/${encodeURIComponent(button.dataset.deleteIntro)}`,{method:'DELETE'}); await loadPhrases(); } catch(error){window.alert(error.message);} }
-    if (button.dataset.setPassword) {
-      const form=passwordDialog.querySelector('[data-admin-password-form]'); form.reset(); form.elements.participantId.value=button.dataset.setPassword; passwordDialog.querySelector('[data-password-title]').textContent=`Mot de passe · ${button.dataset.personName}`; passwordDialog.showModal();
-    }
   });
 
   refreshDialog.addEventListener('click', async event => {
@@ -215,7 +263,6 @@
   mailForm.addEventListener('submit', async event => { event.preventDefault(); if(!event.currentTarget.reportValidity())return; try{await saveMail();mailDialog.close();await loadReview();}catch(error){const node=mailDialog.querySelector('[data-mail-error]');node.textContent=error.message;node.hidden=false;} });
   mailDialog.querySelector('[data-send-from-dialog]').addEventListener('click',async event=>{if(!mailForm.reportValidity())return;event.currentTarget.disabled=true;try{await saveMail();await sendMail(mailForm.elements.id.value);mailDialog.close();}catch(error){const node=mailDialog.querySelector('[data-mail-error]');node.textContent=error.message;node.hidden=false;}finally{event.currentTarget.disabled=false;}});
   introForm.addEventListener('submit',async event=>{event.preventDefault();if(!event.currentTarget.reportValidity())return;const id=introForm.elements.id.value;try{await api(`/api/admin/intro-phrases${id?'/'+encodeURIComponent(id):''}`,{method:id?'PATCH':'POST',body:JSON.stringify({text:introForm.elements.text.value.trim(),tone:introForm.elements.tone.value})});introDialog.close();await loadPhrases();}catch(error){window.alert(error.message);}});
-  passwordDialog.querySelector('[data-admin-password-form]').addEventListener('submit',async event=>{event.preventDefault();if(!event.currentTarget.reportValidity())return;const status=passwordDialog.querySelector('[data-admin-password-status]');const id=event.currentTarget.elements.participantId.value;try{await api(`/api/admin/participants/${encodeURIComponent(id)}/password`,{method:'PATCH',body:JSON.stringify({password:event.currentTarget.elements.password.value})});status.textContent='Mot de passe défini.';event.currentTarget.elements.password.value='';}catch(error){status.textContent=error.message;}});
   app.querySelector('[data-answer-import]').addEventListener('submit',async event=>{event.preventDefault();const file=event.currentTarget.elements.file.files[0];if(!file)return;const body=new FormData();body.append('file',file);const status=event.currentTarget.querySelector('[data-import-status]');status.textContent='Import…';try{const result=await api('/api/admin/import-answers',{method:'POST',body});status.textContent=`${pick(result,'importedCount','imported_count') ?? 'Import'} terminé.`;event.currentTarget.reset();}catch(error){status.textContent=error.message;}});
 
   Promise.all([loadReview(), loadSent(), loadPhrases()]);
