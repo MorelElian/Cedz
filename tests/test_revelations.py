@@ -400,6 +400,10 @@ def test_send_calls_configured_delivery_then_is_idempotent_and_private(client, a
         json={"email": "recipient@example.fr"}, headers=csrf,
     ).status_code == 200
     assert client.patch(
+        f"/api/admin/participants/{author['id']}",
+        json={"email": "author@example.fr"}, headers=csrf,
+    ).status_code == 200
+    assert client.patch(
         f"/api/admin/revelations/{card['id']}",
         json={"intro": "<b>Bonjour</b>", "finalContent": "<script>alert(1)</script>"}, headers=csrf,
     ).status_code == 200
@@ -437,6 +441,16 @@ def test_send_calls_configured_delivery_then_is_idempotent_and_private(client, a
         json={"message": "Je prends note."}, headers=account_csrf,
     )
     assert reply.status_code == 201
+    assert reply.get_json()["notificationSent"] is True
+    assert len(deliveries) == 2
+    notification = deliveries[-1]
+    assert notification[0] == "author@example.fr"
+    assert notification[1] == f"Cedz — {recipient['displayName']} t’a répondu"
+    assert card["question"] in notification[2]
+    assert "Je prends note." in notification[2]
+    assert "Ta question" in notification[2]
+    assert "Ta réponse" in notification[2]
+    assert "Sa réponse" in notification[2]
     assert client.post(
         f"/api/account/revelations/{card['id']}/reply",
         json={"message": "Deuxième réponse."}, headers=account_csrf,

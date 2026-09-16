@@ -1709,6 +1709,55 @@ def format_revelation_content(row: sqlite3.Row) -> str:
     return f"Voilà ce que {author} pense de toi lorsqu'on lui demande : « {question} » Réponse : {content.get('answer')}"
 
 
+def revelation_answer_summary(row: sqlite3.Row) -> str:
+    """Return only the original answer, without repeating the question."""
+    content = json.loads(row["content_json"])
+    kind = row["question_type"]
+    if kind in {"compare_two", "compare_three", "choose_one"}:
+        choice = "T'a choisi." if content["selected"] else f"A choisi {content['selectedParticipant']}."
+        return choice + (f" Commentaire : {content['comment']}" if content.get("comment") else "")
+    if kind == "ranking":
+        if content["position"] == 1:
+            return "T'a mis premier."
+        return f"T'a mis {content['position']}e, juste derrière {content['ahead']}."
+    if kind == "binary_split":
+        return " — ".join(
+            f"{group['label']} : {', '.join(group['people'])}" for group in content["groups"]
+        )
+    return str(content.get("answer", ""))
+
+
+def render_reply_notification_email(row: sqlite3.Row, reply_message: str) -> str:
+    """Render the email sent to the original author after a recipient replies."""
+    content = json.loads(row["content_json"])
+    public_base = str(current_app.config.get("PUBLIC_BASE_URL", "")).rstrip("/")
+    logo_row = _db().execute("SELECT value FROM site_settings WHERE key='logo_url'").fetchone()
+    logo_path = logo_row["value"] if logo_row and logo_row["value"] else url_for("project_logo")
+    logo_url = ((public_base or request.url_root.rstrip("/")) + logo_path
+                if logo_path.startswith("/") else logo_path)
+    question = html.escape(str(content.get("question", "")))
+    original_answer = html.escape(revelation_answer_summary(row))
+    recipient_name = html.escape(row["recipient_name"])
+    reply = html.escape(reply_message)
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'><style>"
+        "body{margin:0;background:#ece9df;color:#17213a;font-family:Arial,sans-serif;line-height:1.6}"
+        ".shell{width:100%;padding:36px 14px}.mail{width:100%;max-width:640px;margin:auto;background:#fff;border-radius:20px;overflow:hidden}"
+        ".header{padding:22px 34px;background:#f3c952}.logo{display:block;width:150px;max-width:100%}"
+        ".section{padding:28px 40px;border-bottom:1px solid #e7e3d9}.eyebrow{margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase}"
+        "h1{margin:0;font-size:30px;line-height:1.2}h2{margin:0;font-size:18px;line-height:1.35}.columns{width:100%;border-spacing:10px 0}.panel{width:50%;padding:20px;vertical-align:top;border-radius:12px}.original{background:#f4f1e9}.reply{background:#fff1ed}"
+        ".question{margin:0 0 16px;font-size:17px;font-weight:bold;line-height:1.45}.answer{margin:0;padding:14px 16px;border-left:4px solid #ffc83d;background:#fff;font-size:15px;white-space:pre-line}.reply-copy{margin:0;padding:14px 16px;border-left:4px solid #f05b42;background:#fff;font-size:16px;white-space:pre-line}"
+        "@media(max-width:520px){.section{padding:22px}.columns{border-spacing:5px 0}.panel{padding:13px}.question{font-size:15px}.answer,.reply-copy{padding:11px;font-size:14px}}"
+        "</style></head><body style='margin:0;background:#ece9df;color:#17213a;font-family:Arial,sans-serif;line-height:1.6'>"
+        "<table class='shell' role='presentation' style='width:100%;padding:36px 14px;background:#ece9df'><tr><td>"
+        "<main class='mail' style='display:block;width:100%;max-width:640px;margin:auto;background:#ffffff;border-radius:20px;overflow:hidden'>"
+        f"<header class='header' style='padding:22px 34px;background:#f3c952'><img class='logo' src='{html.escape(logo_url, quote=True)}' alt='Cedz' style='display:block;width:150px;max-width:100%'></header>"
+        f"<section class='section' style='display:block;padding:28px 40px;border-bottom:1px solid #e7e3d9'><p class='eyebrow' style='margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase'>Nouveau message</p><h1 style='margin:0;font-size:30px;line-height:1.2'>{recipient_name} t’a répondu.</h1></section>"
+        f"<section class='section' style='display:block;padding:28px 40px'><table class='columns' role='presentation' style='width:100%;border-spacing:10px 0'><tr><td class='panel original' style='width:50%;padding:20px;vertical-align:top;background:#f4f1e9;border-radius:12px'><p class='eyebrow' style='margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase'>Ta question</p><p class='question' style='margin:0 0 16px;font-size:17px;font-weight:bold;line-height:1.45'>{question}</p><p class='eyebrow' style='margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase'>Ta réponse</p><p class='answer' style='margin:0;padding:14px 16px;border-left:4px solid #ffc83d;background:#fff;font-size:15px;white-space:pre-line'>{original_answer}</p></td><td class='panel reply' style='width:50%;padding:20px;vertical-align:top;background:#fff1ed;border-radius:12px'><p class='eyebrow' style='margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase'>Sa réponse</p><h2 style='margin:0 0 16px;font-size:18px;line-height:1.35'>{recipient_name} te répond :</h2><p class='reply-copy' style='margin:0;padding:14px 16px;border-left:4px solid #f05b42;background:#fff;font-size:16px;white-space:pre-line'>{reply}</p></td></tr></table></section>"
+        "</main></td></tr></table></body></html>"
+    )
+
+
 def render_revelation_email(row: sqlite3.Row, _final_content: str) -> str:
     data = json.loads(row["content_json"])
     kind = row["question_type"]
@@ -1926,7 +1975,7 @@ def revelation_payload(row: sqlite3.Row, *, admin: bool = False) -> dict[str, An
 def revelation_query(where: str = "") -> str:
     return """SELECT r.*, recipient.email recipient_email, recipient.display_name recipient_name,
               recipient.profile_photo_url recipient_photo, author.display_name author_name,
-              author.profile_photo_url author_photo
+              author.profile_photo_url author_photo, author.email author_email
               FROM revelations r
               JOIN participants recipient ON recipient.id = r.recipient_participant_id
               JOIN participants author ON author.id = r.author_participant_id""" + where
@@ -2164,7 +2213,7 @@ def register_account_api(app: Flask) -> None:
     def reply_to_revelation(revelation_id: int):
         participant = g.current_participant
         revelation = _db().execute(
-            "SELECT * FROM revelations WHERE id=? AND recipient_participant_id=? AND status='sent'",
+            revelation_query(" WHERE r.id=? AND r.recipient_participant_id=? AND r.status='sent'"),
             (revelation_id, participant["id"]),
         ).fetchone()
         if not revelation:
@@ -2178,7 +2227,19 @@ def register_account_api(app: Flask) -> None:
             _db().commit()
         except sqlite3.IntegrityError:
             abort_json(409, "Tu as déjà répondu à cette révélation.")
-        return jsonify({"created": True, "reply": {"message": message, "createdAt": utcnow()}}), 201
+        notification_sent = False
+        if revelation["author_email"] and EMAIL_RE.fullmatch(revelation["author_email"]):
+            try:
+                subject = f"Cedz — {participant['display_name']} t’a répondu"
+                deliver_email(
+                    revelation["author_email"], subject,
+                    render_reply_notification_email(revelation, message),
+                )
+                notification_sent = True
+            except MailDeliveryError:
+                current_app.logger.warning("Reply notification delivery failed for revelation %s", revelation_id)
+        return jsonify({"created": True, "notificationSent": notification_sent,
+                        "reply": {"message": message, "createdAt": utcnow()}}), 201
 
 
 def register_admin_api(app: Flask) -> None:
