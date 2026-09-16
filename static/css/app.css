@@ -423,11 +423,12 @@ tbody tr:last-child td { border-bottom: 0; }
 .mail-copy p { margin: 0 0 .9rem; }
 .mail-copy p:last-child { margin-bottom: 0; }
 .mail-suggest-link { display: inline-block; padding: .45rem .65rem; border-radius: 7px; color: white; background: var(--navy); font-size: .58rem; letter-spacing: .03em; line-height: 1.25; text-align: center; }
-.mail-preview-bonus { display: grid; justify-items: center; gap: .45rem; margin-top: 1rem; padding: 1rem; text-align: center; background: #f4f1e9; border-radius: 10px; }
+.mail-preview-bonus { display: grid; justify-items: start; gap: .45rem; padding: 1rem; text-align: left; background: #f4f1e9; border-radius: 10px; }
 .mail-preview-bonus small { color: var(--coral-dark); font-size: .65rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
-.mail-preview-actions { display: flex; justify-content: space-between; gap: .6rem; margin: 1rem -1.6rem -1.6rem; padding: 1rem 1.6rem; background: white; }
-.mail-preview-actions span { display: inline-block; padding: .7rem .85rem; border-radius: 8px; color: white; background: var(--coral); font-size: .8rem; font-weight: 900; }
-.mail-preview-actions span:last-child { background: var(--navy); }
+.mail-preview-actions { display: grid; grid-template-columns: .8fr 1.2fr; align-items: stretch; gap: .6rem; margin: 1rem -1.6rem -1.6rem; padding: 1rem 1.6rem; background: white; }
+.mail-preview-reply { display: grid; place-items: center; padding: 1rem; border-radius: 10px; background: #fff1ed; }
+.mail-preview-reply span,.mail-preview-bonus > span { display: inline-block; padding: .7rem .85rem; border-radius: 8px; color: white; background: var(--coral); font-size: .8rem; font-weight: 900; }
+.mail-preview-bonus > span { background: var(--navy); }
 .mail-type-ranking { border-top: 6px solid var(--yellow); }.mail-type-duel { border-top: 6px solid var(--coral); }.mail-type-split { border-top: 6px solid #459acb; }.mail-type-number { border-top: 6px solid var(--mint); }.mail-type-text { border-top: 6px solid var(--navy); }
 .mail-preview.is-compact { font-size: .9rem; }
 .mail-routing { display: flex; gap: 2rem; margin: 1rem 0 0; }

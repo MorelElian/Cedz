@@ -1709,7 +1709,7 @@ def format_revelation_content(row: sqlite3.Row) -> str:
     return f"Voilà ce que {author} pense de toi lorsqu'on lui demande : « {question} » Réponse : {content.get('answer')}"
 
 
-def render_revelation_email(row: sqlite3.Row, final_content: str) -> str:
+def render_revelation_email(row: sqlite3.Row, _final_content: str) -> str:
     data = json.loads(row["content_json"])
     kind = row["question_type"]
     public_base = str(current_app.config.get("PUBLIC_BASE_URL", "")).rstrip("/")
@@ -1760,11 +1760,6 @@ def render_revelation_email(row: sqlite3.Row, final_content: str) -> str:
     else:
         detail = ("<blockquote style='margin:24px 0 0;padding:18px 22px;border-left:4px solid #ffc83d;"
                   f"background:#f4f1e9;font-size:18px;line-height:1.65'>{html.escape(str(data.get('answer', '')))}</blockquote>")
-    copy_parts = []
-    for paragraph in re.split(r"(?:\r?\n){2,}|(?<=[.!?])\s+(?=[A-ZÀ-Ö])", final_content.strip()):
-        if paragraph.strip():
-            copy_parts.append(f"<p style='margin:0 0 16px'>{html.escape(paragraph.strip())}</p>")
-    final_copy = "".join(copy_parts)
     author_photo = (f"<img class='author' src='{html.escape(photo_url, quote=True)}' alt='' "
                     "style='display:block;width:68px;height:68px;margin:0 0 8px auto;border-radius:50%;object-fit:cover'>"
                     if photo_url else "")
@@ -1779,18 +1774,16 @@ def render_revelation_email(row: sqlite3.Row, final_content: str) -> str:
         ".rank,.number,.verdict{margin:26px 0 8px;color:#d45a45;font-size:46px;font-weight:900;line-height:1.1}"
         ".groups{width:100%;margin-top:24px;border-spacing:10px 0}.group{width:50%;padding:20px;vertical-align:top;background:#f4f1e9;border-radius:12px}.group ul{margin:0;padding-left:18px}"
         "blockquote{margin:24px 0 0;padding:18px 22px;border-left:4px solid #ffc83d;background:#f4f1e9;font-size:18px;line-height:1.65}"
-        ".copy p{margin:0 0 16px}.copy p:last-child{margin-bottom:0}.bonus{padding:24px 40px;background:#f4f1e9;text-align:center}.actions{padding:22px 40px 28px}.actions-table{width:100%}"
-        ".actions a{display:inline-block;padding:15px 18px;border-radius:9px;color:#fff;text-decoration:none;font-size:16px;font-weight:bold}.reply-link{background:#f05b42}.daily-link{background:#17213a}"
-        "@media(max-width:520px){.section,.bonus,.actions{padding:22px}.intro-author{width:110px;padding-left:12px}.header{padding:22px}.groups{border-spacing:5px 0}.group{padding:14px}.actions a{padding:13px 11px;font-size:14px}}"
+        ".actions{padding:22px 40px 28px}.actions-table{width:100%;border-spacing:10px 0}.reply-panel,.daily-panel{padding:20px;vertical-align:middle;border-radius:12px}.reply-panel{width:42%;background:#fff1ed;text-align:center}.daily-panel{width:58%;background:#f4f1e9;text-align:left}"
+        ".daily-question{margin:0 0 14px;font-size:16px;font-weight:bold;line-height:1.4}.actions a{display:inline-block;padding:14px 16px;border-radius:9px;color:#fff;text-decoration:none;font-size:16px;font-weight:bold}.reply-link{background:#f05b42}.daily-link{background:#17213a}"
+        "@media(max-width:520px){.section,.actions{padding:22px}.intro-author{width:110px;padding-left:12px}.header{padding:22px}.groups{border-spacing:5px 0}.group{padding:14px}.actions-table{border-spacing:5px 0}.reply-panel,.daily-panel{padding:13px}.actions a{padding:12px 9px;font-size:13px}.daily-question{font-size:14px}}"
         "</style></head><body style='margin:0;background:#ece9df;color:#17213a;font-family:Arial,sans-serif;line-height:1.65'>"
         "<table class='shell' role='presentation' style='width:100%;padding:36px 14px;background:#ece9df'><tr><td>"
         "<main class='mail' style='display:block;width:100%;max-width:640px;margin:auto;background:#ffffff;border-radius:20px;overflow:hidden'>"
         f"<header class='header' style='padding:22px 34px;background:#f3c952'><table role='presentation' style='width:100%'><tr><td><img class='logo' src='{html.escape(logo_url, quote=True)}' alt='Cedz' style='display:block;width:150px;max-width:100%'></td><td align='right'><a class='header-link' href='{html.escape(account_url, quote=True)}' style='display:inline-block;padding:10px 13px;border-radius:8px;background:#17213a;color:#ffffff;font-size:12px;font-weight:bold;line-height:1.25;text-align:center;text-decoration:none'>Proposer une<br>nouvelle question</a></td></tr></table></header>"
         f"<section class='section' style='display:block;padding:28px 40px;border-bottom:1px solid #e7e3d9'><table class='intro-table' role='presentation' style='width:100%;border-collapse:collapse'><tr><td valign='middle'><p class='eyebrow' style='margin:0 0 12px;color:#d45a45;font-size:12px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase'>T24 · dossier confidentiel</p><h1 style='margin:0;font-size:32px;line-height:1.2'>{html.escape(row['intro_text'] or 'On a parlé de toi.')}</h1></td><td class='intro-author' align='right' valign='middle' style='width:150px;padding-left:24px;text-align:right'>{author_photo}<p class='author-copy' style='margin:0;font-size:14px;line-height:1.35'><strong>{html.escape(row['author_name'])}</strong><br>a parlé de toi.</p></td></tr></table></section>"
         f"<section class='section' style='display:block;padding:32px 40px;border-bottom:1px solid #e7e3d9'><p class='eyebrow' style='margin:0 0 12px;color:#d45a45;font-size:12px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase'>La question</p><h2 style='margin:0;font-size:23px;line-height:1.4'>{html.escape(data['question'])}</h2>{detail}</section>"
-        f"<section class='section copy' style='display:block;padding:32px 40px;border-bottom:1px solid #e7e3d9'>{final_copy}</section>"
-        f"<section class='bonus' style='display:block;padding:24px 40px;background:#f4f1e9;text-align:center'><p class='eyebrow' style='margin:0 0 12px;color:#d45a45;font-size:12px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase'>Aujourd’hui, la question bonus</p><h2 style='margin:0;font-size:23px;line-height:1.4'>{html.escape(daily_question)}</h2></section>"
-        f"<section class='actions' style='display:block;padding:22px 40px 28px'><table class='actions-table' role='presentation' style='width:100%'><tr><td align='left'><a class='reply-link' href='{html.escape(detail_url, quote=True)}' style='display:inline-block;padding:15px 18px;border-radius:9px;background:#f05b42;color:#fff;text-decoration:none;font-size:16px;font-weight:bold'>Réponds-lui&nbsp;→</a></td><td align='right'><a class='daily-link' href='{html.escape(account_url, quote=True)}' style='display:inline-block;padding:15px 18px;border-radius:9px;background:#17213a;color:#fff;text-decoration:none;font-size:16px;font-weight:bold'>Réponds à la question&nbsp;→</a></td></tr></table></section>"
+        f"<section class='actions' style='display:block;padding:22px 40px 28px'><table class='actions-table' role='presentation' style='width:100%;border-spacing:10px 0'><tr><td class='reply-panel' align='center' valign='middle' style='width:42%;padding:20px;vertical-align:middle;background:#fff1ed;border-radius:12px'><a class='reply-link' href='{html.escape(detail_url, quote=True)}' style='display:inline-block;padding:14px 16px;border-radius:9px;background:#f05b42;color:#fff;text-decoration:none;font-size:16px;font-weight:bold'>Réponds-lui&nbsp;→</a></td><td class='daily-panel' valign='middle' style='width:58%;padding:20px;vertical-align:middle;background:#f4f1e9;border-radius:12px'><p class='eyebrow' style='margin:0 0 8px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.2px;text-transform:uppercase'>Question du moment</p><p class='daily-question' style='margin:0 0 14px;font-size:16px;font-weight:bold;line-height:1.4'>{html.escape(daily_question)}</p><a class='daily-link' href='{html.escape(account_url, quote=True)}' style='display:inline-block;padding:14px 16px;border-radius:9px;background:#17213a;color:#fff;text-decoration:none;font-size:16px;font-weight:bold'>Y répondre&nbsp;→</a></td></tr></table></section>"
         "</main></td></tr></table></body></html>"
     )
 

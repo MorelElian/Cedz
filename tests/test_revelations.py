@@ -408,9 +408,11 @@ def test_send_calls_configured_delivery_then_is_idempotent_and_private(client, a
     assert sent.get_json()["deliveryMode"] == "gmail"
     assert len(deliveries) == 1 and deliveries[0][0] == "recipient@example.fr"
     snapshot = sent.get_json()["htmlSnapshot"]
-    assert "&lt;script&gt;" in snapshot
+    assert "<script>" not in snapshot
+    assert "&lt;script&gt;" not in snapshot
     assert "<main class='mail' style=" in snapshot
-    assert "<section class='section copy' style=" in snapshot
+    assert "<section class='actions' style=" in snapshot
+    assert "Question du moment" in snapshot
     assert "line-height:1.65" in snapshot
     assert "https://cedz.example/logo.png" in snapshot
     assert "https://cedz.example/profile-images/" in snapshot
