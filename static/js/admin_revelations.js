@@ -148,9 +148,16 @@
       const author = pick(item,'authorName','author_name','toParticipant','to_participant') || 'l’auteur';
       const question = pick(item,'originalQuestion','original_question') || '';
       const original = pick(item,'originalMessage','original_message') || '';
+      const replyId = pick(item, 'id', 'replyId', 'reply_id');
+      const authorEmail = pick(item, 'authorEmail', 'author_email') || '';
+      const notificationSentAt = pick(item, 'notificationSentAt', 'notification_sent_at');
+      const sentLabel = notificationSentAt
+        ? `Envoyé le ${new Date(notificationSentAt).toLocaleString('fr-FR')}`
+        : (authorEmail ? 'Pas encore envoyé' : 'Email de l’auteur manquant');
       return `<article class="received-reply"><header><strong>${esc(sender)}</strong><small>à ${esc(author)}</small><time>${esc(pick(item,'createdAt','created_at') || '')}</time></header>
         <div class="reply-context"><small>Message de ${esc(author)} auquel ${esc(sender)} répond</small>${question ? `<p>${esc(question)}</p>` : ''}<div>${esc(original || 'Message d’origine indisponible.')}</div></div>
-        <small class="reply-answer-label">Réponse de ${esc(sender)}</small><blockquote>${esc(pick(item,'message','content') || '—')}</blockquote></article>`;
+        <small class="reply-answer-label">Réponse de ${esc(sender)}</small><blockquote>${esc(pick(item,'message','content') || '—')}</blockquote>
+        <footer class="reply-notification-footer"><small>${esc(sentLabel)}</small><button class="button button-secondary button-small" type="button" data-send-reply-notification="${esc(replyId)}" ${authorEmail ? '' : 'disabled'}>${notificationSentAt ? 'Renvoyer le mail' : 'Envoyer le mail'}</button></footer></article>`;
     }).join('');
   }
 
@@ -234,6 +241,21 @@
       button.disabled = true;
       try { await sendMail(button.dataset.sendRevelation); }
       catch (error) { button.disabled = false; window.alert(error.message); }
+    }
+    if (button.dataset.sendReplyNotification) {
+      if (!window.confirm('Envoyer ce mail de notification à l’auteur ?')) return;
+      button.disabled = true;
+      const initialText = button.textContent;
+      button.textContent = 'Envoi…';
+      try {
+        await api(`/api/admin/revelation-replies/${encodeURIComponent(button.dataset.sendReplyNotification)}/send-notification`, {method:'POST', body:'{}'});
+        await loadSent();
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = initialText;
+        window.alert(error.message);
+      }
+      return;
     }
     if (button.matches('[data-send-active-revelations]')) {
       const count=state.review.filter(item=>{const recipient=person(item,'recipient');return Boolean(pick(item,'recipientEmail','recipient_email')||pick(recipient,'email'));}).length;

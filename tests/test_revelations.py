@@ -451,6 +451,9 @@ def test_send_calls_configured_delivery_then_is_idempotent_and_private(client, a
     assert "Ta question" in notification[2]
     assert "Ta réponse" in notification[2]
     assert "Sa réponse" in notification[2]
+    assert "Se connecter à Cedz" in notification[2]
+    assert "Question du jour" in notification[2]
+    assert "https://cedz.example/mon-compte" in notification[2]
     assert client.post(
         f"/api/account/revelations/{card['id']}/reply",
         json={"message": "Deuxième réponse."}, headers=account_csrf,
@@ -466,6 +469,13 @@ def test_send_calls_configured_delivery_then_is_idempotent_and_private(client, a
     assert replies[0]["message"] == "Je prends note."
     assert replies[0]["originalQuestion"] == card["question"]
     assert replies[0]["originalMessage"] == "<script>alert(1)</script>"
+    assert replies[0]["notificationSentAt"]
+    resend = client.post(
+        f"/api/admin/revelation-replies/{replies[0]['id']}/send-notification", headers=admin_csrf,
+    )
+    assert resend.status_code == 200
+    assert resend.get_json()["sent"] is True
+    assert len(deliveries) == 3
 
 
 def test_failed_gmail_delivery_keeps_revelation_in_review(client, app, monkeypatch):

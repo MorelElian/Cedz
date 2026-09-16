@@ -423,7 +423,9 @@ def init_db() -> None:
             revelation_id INTEGER NOT NULL UNIQUE REFERENCES revelations(id),
             participant_id INTEGER NOT NULL REFERENCES participants(id),
             message TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            notification_sent_at TEXT,
+            notification_delivery_mode TEXT
         );
         CREATE TABLE IF NOT EXISTS participant_intro_usage (
             participant_id INTEGER NOT NULL REFERENCES participants(id),
@@ -450,6 +452,11 @@ def init_db() -> None:
     revelation_columns = {row["name"] for row in _db().execute("PRAGMA table_info(revelations)")}
     if "admin_edited" not in revelation_columns:
         _db().execute("ALTER TABLE revelations ADD COLUMN admin_edited INTEGER NOT NULL DEFAULT 0")
+    reply_columns = {row["name"] for row in _db().execute("PRAGMA table_info(revelation_replies)")}
+    if "notification_sent_at" not in reply_columns:
+        _db().execute("ALTER TABLE revelation_replies ADD COLUMN notification_sent_at TEXT")
+    if "notification_delivery_mode" not in reply_columns:
+        _db().execute("ALTER TABLE revelation_replies ADD COLUMN notification_delivery_mode TEXT")
     imported_columns = {row["name"] for row in _db().execute("PRAGMA table_info(imported_answers)")}
     if "source_session_id" not in imported_columns:
         _db().execute("ALTER TABLE imported_answers ADD COLUMN source_session_id TEXT")
@@ -1731,6 +1738,14 @@ def render_reply_notification_email(row: sqlite3.Row, reply_message: str) -> str
     """Render the email sent to the original author after a recipient replies."""
     content = json.loads(row["content_json"])
     public_base = str(current_app.config.get("PUBLIC_BASE_URL", "")).rstrip("/")
+    account_path = url_for("account_page")
+    account_url = public_base + account_path if public_base else url_for("account_page", _external=True)
+    daily_row = _db().execute(
+        """SELECT rendered_body FROM daily_questions
+           WHERE participant_id=? AND status='active' ORDER BY id DESC LIMIT 1""",
+        (row["author_participant_id"],),
+    ).fetchone()
+    daily_question = daily_row["rendered_body"] if daily_row else "Une question du jour t’attend dans ton espace."
     logo_row = _db().execute("SELECT value FROM site_settings WHERE key='logo_url'").fetchone()
     logo_path = logo_row["value"] if logo_row and logo_row["value"] else url_for("project_logo")
     logo_url = ((public_base or request.url_root.rstrip("/")) + logo_path
@@ -1747,13 +1762,16 @@ def render_reply_notification_email(row: sqlite3.Row, reply_message: str) -> str
         ".section{padding:28px 40px;border-bottom:1px solid #e7e3d9}.eyebrow{margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase}"
         "h1{margin:0;font-size:30px;line-height:1.2}h2{margin:0;font-size:18px;line-height:1.35}.columns{width:100%;border-spacing:10px 0}.panel{width:50%;padding:20px;vertical-align:top;border-radius:12px}.original{background:#f4f1e9}.reply{background:#fff1ed}"
         ".question{margin:0 0 16px;font-size:17px;font-weight:bold;line-height:1.45}.answer{margin:0;padding:14px 16px;border-left:4px solid #ffc83d;background:#fff;font-size:15px;white-space:pre-line}.reply-copy{margin:0;padding:14px 16px;border-left:4px solid #f05b42;background:#fff;font-size:16px;white-space:pre-line}"
-        "@media(max-width:520px){.section{padding:22px}.columns{border-spacing:5px 0}.panel{padding:13px}.question{font-size:15px}.answer,.reply-copy{padding:11px;font-size:14px}}"
+        ".account-cta{padding:22px 40px;text-align:center}.account-cta a,.daily a{display:inline-block;padding:14px 18px;border-radius:9px;background:#17213a;color:#fff;text-decoration:none;font-size:16px;font-weight:bold}.daily{padding:24px 40px;background:#f4f1e9;text-align:center}.daily-question{margin:0 0 16px;font-size:18px;font-weight:bold;line-height:1.4}"
+        "@media(max-width:520px){.section,.account-cta,.daily{padding:22px}.columns{border-spacing:5px 0}.panel{padding:13px}.question{font-size:15px}.answer,.reply-copy{padding:11px;font-size:14px}}"
         "</style></head><body style='margin:0;background:#ece9df;color:#17213a;font-family:Arial,sans-serif;line-height:1.6'>"
         "<table class='shell' role='presentation' style='width:100%;padding:36px 14px;background:#ece9df'><tr><td>"
         "<main class='mail' style='display:block;width:100%;max-width:640px;margin:auto;background:#ffffff;border-radius:20px;overflow:hidden'>"
         f"<header class='header' style='padding:22px 34px;background:#f3c952'><img class='logo' src='{html.escape(logo_url, quote=True)}' alt='Cedz' style='display:block;width:150px;max-width:100%'></header>"
         f"<section class='section' style='display:block;padding:28px 40px;border-bottom:1px solid #e7e3d9'><p class='eyebrow' style='margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase'>Nouveau message</p><h1 style='margin:0;font-size:30px;line-height:1.2'>{recipient_name} t’a répondu.</h1></section>"
         f"<section class='section' style='display:block;padding:28px 40px'><table class='columns' role='presentation' style='width:100%;border-spacing:10px 0'><tr><td class='panel original' style='width:50%;padding:20px;vertical-align:top;background:#f4f1e9;border-radius:12px'><p class='eyebrow' style='margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase'>Ta question</p><p class='question' style='margin:0 0 16px;font-size:17px;font-weight:bold;line-height:1.45'>{question}</p><p class='eyebrow' style='margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase'>Ta réponse</p><p class='answer' style='margin:0;padding:14px 16px;border-left:4px solid #ffc83d;background:#fff;font-size:15px;white-space:pre-line'>{original_answer}</p></td><td class='panel reply' style='width:50%;padding:20px;vertical-align:top;background:#fff1ed;border-radius:12px'><p class='eyebrow' style='margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase'>Sa réponse</p><h2 style='margin:0 0 16px;font-size:18px;line-height:1.35'>{recipient_name} te répond :</h2><p class='reply-copy' style='margin:0;padding:14px 16px;border-left:4px solid #f05b42;background:#fff;font-size:16px;white-space:pre-line'>{reply}</p></td></tr></table></section>"
+        f"<section class='account-cta' style='display:block;padding:22px 40px;text-align:center'><a href='{html.escape(account_url, quote=True)}' style='display:inline-block;padding:14px 18px;border-radius:9px;background:#17213a;color:#fff;text-decoration:none;font-size:16px;font-weight:bold'>Se connecter à Cedz&nbsp;→</a></section>"
+        f"<section class='daily' style='display:block;padding:24px 40px;background:#f4f1e9;text-align:center'><p class='eyebrow' style='margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase'>Question du jour</p><p class='daily-question' style='margin:0 0 16px;font-size:18px;font-weight:bold;line-height:1.4'>{html.escape(daily_question)}</p><a href='{html.escape(account_url, quote=True)}' style='display:inline-block;padding:14px 18px;border-radius:9px;background:#17213a;color:#fff;text-decoration:none;font-size:16px;font-weight:bold'>Y répondre&nbsp;→</a></section>"
         "</main></td></tr></table></body></html>"
     )
 
@@ -2222,8 +2240,10 @@ def register_account_api(app: Flask) -> None:
         if not message or len(message) > 2000:
             abort_json(400, "La réponse doit contenir entre 1 et 2000 caractères.")
         try:
-            _db().execute("INSERT INTO revelation_replies(revelation_id, participant_id, message, created_at) VALUES (?, ?, ?, ?)",
-                          (revelation_id, participant["id"], message, utcnow()))
+            reply_cursor = _db().execute(
+                "INSERT INTO revelation_replies(revelation_id, participant_id, message, created_at) VALUES (?, ?, ?, ?)",
+                (revelation_id, participant["id"], message, utcnow()),
+            )
             _db().commit()
         except sqlite3.IntegrityError:
             abort_json(409, "Tu as déjà répondu à cette révélation.")
@@ -2231,10 +2251,15 @@ def register_account_api(app: Flask) -> None:
         if revelation["author_email"] and EMAIL_RE.fullmatch(revelation["author_email"]):
             try:
                 subject = f"Cedz — {participant['display_name']} t’a répondu"
-                deliver_email(
+                delivery_mode = deliver_email(
                     revelation["author_email"], subject,
                     render_reply_notification_email(revelation, message),
                 )
+                _db().execute(
+                    "UPDATE revelation_replies SET notification_sent_at=?, notification_delivery_mode=? WHERE id=?",
+                    (utcnow(), delivery_mode, reply_cursor.lastrowid),
+                )
+                _db().commit()
                 notification_sent = True
             except MailDeliveryError:
                 current_app.logger.warning("Reply notification delivery failed for revelation %s", revelation_id)
@@ -2576,8 +2601,9 @@ def register_admin_api(app: Flask) -> None:
     def admin_revelation_replies():
         rows = _db().execute(
             """SELECT rr.id,rr.revelation_id,rr.message,rr.created_at,
+                      rr.notification_sent_at,rr.notification_delivery_mode,
                       recipient.id participant_id,recipient.display_name participant_name,
-                      author.id author_id,author.display_name author_name,
+                      author.id author_id,author.display_name author_name,author.email author_email,
                       r.content_json,r.content_snapshot,r.final_content
                FROM revelation_replies rr JOIN revelations r ON r.id=rr.revelation_id
                JOIN participants recipient ON recipient.id=rr.participant_id
@@ -2591,10 +2617,46 @@ def register_admin_api(app: Flask) -> None:
                 "id": row["id"], "revelationId": row["revelation_id"], "message": row["message"],
                 "participantId": row["participant_id"], "participantName": row["participant_name"],
                 "authorId": row["author_id"], "authorName": row["author_name"], "createdAt": row["created_at"],
+                "authorEmail": row["author_email"], "notificationSentAt": row["notification_sent_at"],
+                "notificationDeliveryMode": row["notification_delivery_mode"],
                 "originalQuestion": content.get("question", ""),
                 "originalMessage": row["content_snapshot"] or row["final_content"] or "",
             })
         return jsonify({"replies": replies})
+
+    @app.post("/api/admin/revelation-replies/<int:reply_id>/send-notification")
+    @admin_required
+    def admin_send_reply_notification(reply_id: int):
+        row = _db().execute(
+            """SELECT r.*, rr.id reply_id,rr.message reply_message,
+                      recipient.email recipient_email,recipient.display_name recipient_name,
+                      recipient.profile_photo_url recipient_photo,author.display_name author_name,
+                      author.profile_photo_url author_photo,author.email author_email
+               FROM revelation_replies rr
+               JOIN revelations r ON r.id=rr.revelation_id
+               JOIN participants recipient ON recipient.id=r.recipient_participant_id
+               JOIN participants author ON author.id=r.author_participant_id
+               WHERE rr.id=?""",
+            (reply_id,),
+        ).fetchone()
+        if not row:
+            abort_json(404, "Réponse introuvable.")
+        if not row["author_email"] or not EMAIL_RE.fullmatch(row["author_email"]):
+            abort_json(409, "L’auteur n’a pas d’adresse email valide.")
+        try:
+            delivery_mode = deliver_email(
+                row["author_email"], f"Cedz — {row['recipient_name']} t’a répondu",
+                render_reply_notification_email(row, row["reply_message"]),
+            )
+        except MailDeliveryError:
+            abort_json(502, "L’envoi Gmail a échoué. Tu peux réessayer.")
+        sent_at = utcnow()
+        _db().execute(
+            "UPDATE revelation_replies SET notification_sent_at=?, notification_delivery_mode=? WHERE id=?",
+            (sent_at, delivery_mode, reply_id),
+        )
+        _db().commit()
+        return jsonify({"sent": True, "notificationSentAt": sent_at, "deliveryMode": delivery_mode})
 
     @app.patch("/api/admin/revelations/<int:revelation_id>")
     @admin_required
