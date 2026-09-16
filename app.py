@@ -46,6 +46,7 @@ QUESTION_TYPES = {
     "single_person_answer",
     "compare_two",
     "compare_three",
+    "choose_one",
     "ranking",
     "binary_split",
     "slider",
@@ -666,7 +667,9 @@ def import_answers(items: Any, source_name: str = "manual.json") -> dict[str, in
 
 
 def revelation_recipient_ids(row: sqlite3.Row, answer: Any) -> list[int]:
-    if row["question_type"] == "ranking":
+    if row["question_type"] == "choose_one":
+        ids = [answer.get("selected_participant_id")] if isinstance(answer, dict) else []
+    elif row["question_type"] == "ranking":
         ids = answer.get("ordered_participant_ids", []) if isinstance(answer, dict) else []
     elif row["question_type"] == "binary_split":
         ids = answer.get("category_a", []) + answer.get("category_b", []) if isinstance(answer, dict) else []
@@ -682,7 +685,7 @@ def revelation_content(row: sqlite3.Row, recipient_id: int, answer: Any) -> dict
     names = {item["id"]: item["display_name"] for item in _db().execute("SELECT id,display_name FROM participants")}
     base = {"question": row["rendered_question"], "questionTitle": row["question_title"],
             "author": names[row["author_participant_id"]], "recipient": names[recipient_id]}
-    if row["question_type"] in {"compare_two", "compare_three"}:
+    if row["question_type"] in {"compare_two", "compare_three", "choose_one"}:
         selected = int(answer.get("selected_participant_id"))
         base.update(selectedParticipant=names.get(selected), selected=selected == recipient_id,
                     comment=str(answer.get("comment", "")))
@@ -888,17 +891,22 @@ def render_question(body: str, people: list[sqlite3.Row]) -> str:
         return body
 
 
-DAILY_QUESTION_TYPES = {"free_text", "compare_two", "compare_three", "slider"}
+DAILY_QUESTION_TYPES = {"free_text", "compare_two", "compare_three", "choose_one", "slider"}
 
 
 def daily_question_payload(row: sqlite3.Row) -> dict[str, Any]:
+    targets = [{"id": row[key], "displayName": row[f"{key}_name"]}
+               for key in ("target_participant_id", "target_participant_2_id", "target_participant_3_id")
+               if row[key] is not None]
+    if row["type"] == "choose_one":
+        targets = [participant_payload(person) for person in _db().execute(
+            "SELECT * FROM participants WHERE is_active=1 AND id!=? ORDER BY display_name", (row["participant_id"],)
+        ).fetchall()]
     return {
         "id": row["id"], "questionId": row["question_id"], "title": row["title"],
         "body": row["rendered_body"], "type": row["type"], "category": row["category"],
         "scaleMin": row["scale_min"], "scaleMax": row["scale_max"],
-        "targets": [{"id": row[key], "displayName": row[f"{key}_name"]}
-                    for key in ("target_participant_id", "target_participant_2_id", "target_participant_3_id")
-                    if row[key] is not None],
+        "targets": targets,
         "status": row["status"], "availableAfter": row["available_after"],
     }
 
@@ -933,7 +941,7 @@ def current_daily_question(participant_id: int, *, force: bool = False, question
     rng = secrets.SystemRandom()
     rng.shuffle(candidates)
     for question in candidates:
-        count = {"free_text": 1, "slider": 1, "compare_two": 2, "compare_three": 3}[question["type"]]
+        count = {"free_text": 1, "slider": 1, "compare_two": 2, "compare_three": 3, "choose_one": 0}[question["type"]]
         if len(people) < count:
             continue
         group = rng.sample(people, count)
@@ -1632,12 +1640,13 @@ def validate_answer(instance: sqlite3.Row, answer: Any, target_ids: list[int]) -
     if not isinstance(answer, dict):
         abort_json(400, "Réponse structurée invalide.")
     active_ids = {row["id"] for row in _db().execute("SELECT id FROM participants WHERE is_active = 1")}
-    if question_type in {"compare_two", "compare_three"}:
+    if question_type in {"compare_two", "compare_three", "choose_one"}:
         try:
             selected = int(answer.get("selectedParticipantId"))
         except (TypeError, ValueError):
             abort_json(400, "Choix invalide.")
-        if selected not in target_ids:
+        allowed_ids = active_ids if question_type == "choose_one" else set(target_ids)
+        if selected not in allowed_ids:
             abort_json(400, "Le participant choisi ne fait pas partie de la comparaison.")
         comment = str(answer.get("comment", "")).strip()
         if len(comment) > 1000:
@@ -1682,7 +1691,7 @@ def format_revelation_content(row: sqlite3.Row) -> str:
     content = json.loads(row["content_json"])
     author, question = content["author"], content["question"]
     kind = row["question_type"]
-    if kind in {"compare_two", "compare_three"}:
+    if kind in {"compare_two", "compare_three", "choose_one"}:
         verdict = "Il t'a choisi." if content["selected"] else f"Il a choisi {content['selectedParticipant']}."
         comment = f" Son commentaire : {content['comment']}" if content.get("comment") else ""
         return f"On a demandé à {author} : {question} {verdict}{comment}"
@@ -1708,6 +1717,14 @@ def render_revelation_email(row: sqlite3.Row, final_content: str) -> str:
     detail_url = public_base + detail_path if public_base else url_for(
         "revelation_detail_page", revelation_id=row["id"], _external=True
     )
+    account_path = url_for("account_page")
+    account_url = public_base + account_path if public_base else url_for("account_page", _external=True)
+    daily_row = _db().execute(
+        """SELECT rendered_body FROM daily_questions
+           WHERE participant_id=? AND status='active' ORDER BY id DESC LIMIT 1""",
+        (row["recipient_participant_id"],),
+    ).fetchone()
+    daily_question = daily_row["rendered_body"] if daily_row else "Une nouvelle question bonus t'attend dans ton espace."
     logo_row = _db().execute("SELECT value FROM site_settings WHERE key='logo_url'").fetchone()
     logo_path = logo_row["value"] if logo_row and logo_row["value"] else url_for("project_logo")
     logo_url = ((public_base or request.url_root.rstrip("/")) + logo_path
@@ -1715,7 +1732,7 @@ def render_revelation_email(row: sqlite3.Row, final_content: str) -> str:
     photo_url = row["author_photo"] or ""
     if photo_url.startswith("/"):
         photo_url = (public_base or request.url_root.rstrip("/")) + photo_url
-    if kind in {"compare_two", "compare_three"}:
+    if kind in {"compare_two", "compare_three", "choose_one"}:
         verdict = "CHOISI" if data["selected"] else f"{data['selectedParticipant']} choisi"
         detail = ("<div class='verdict' style='margin:26px 0 8px;color:#d45a45;"
                   f"font-size:46px;font-weight:900;line-height:1.1'>{html.escape(verdict)}</div>")
@@ -1755,25 +1772,26 @@ def render_revelation_email(row: sqlite3.Row, final_content: str) -> str:
         "<!doctype html><html><head><meta charset='utf-8'><style>"
         "body{margin:0;background:#ece9df;color:#17213a;font-family:Arial,sans-serif;line-height:1.65}"
         ".shell{width:100%;padding:36px 14px}.mail{width:100%;max-width:640px;margin:auto;background:#fff;border-radius:20px;overflow:hidden}"
-        ".header{padding:26px 34px;background:#17213a}.logo{display:block;width:150px;max-width:100%}"
+        ".header{padding:22px 34px;background:#f3c952}.logo{display:block;width:150px;max-width:100%}.header-link{display:inline-block;padding:10px 13px;border-radius:8px;background:#17213a;color:#fff;font-size:12px;font-weight:bold;line-height:1.25;text-align:center;text-decoration:none}"
         ".section{padding:32px 40px;border-bottom:1px solid #e7e3d9}.eyebrow{margin:0 0 12px;color:#d45a45;font-size:12px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase}"
         "h1{margin:0;font-size:32px;line-height:1.2}h2{margin:0;font-size:23px;line-height:1.4}h3{margin:0 0 12px;font-size:16px}"
         ".author{display:block;width:82px;height:82px;margin:0 0 14px;border-radius:50%;object-fit:cover}.author-copy{margin:0;font-size:17px}"
         ".rank,.number,.verdict{margin:26px 0 8px;color:#d45a45;font-size:46px;font-weight:900;line-height:1.1}"
         ".groups{width:100%;margin-top:24px;border-spacing:10px 0}.group{width:50%;padding:20px;vertical-align:top;background:#f4f1e9;border-radius:12px}.group ul{margin:0;padding-left:18px}"
         "blockquote{margin:24px 0 0;padding:18px 22px;border-left:4px solid #ffc83d;background:#f4f1e9;font-size:18px;line-height:1.65}"
-        ".copy p{margin:0 0 16px}.copy p:last-child{margin-bottom:0}.cta{padding:34px 40px 40px;text-align:center}"
-        ".cta a{display:inline-block;padding:15px 22px;border-radius:9px;background:#ffc83d;color:#17213a;text-decoration:none;font-weight:bold}"
+        ".copy p{margin:0 0 16px}.copy p:last-child{margin-bottom:0}.cta{padding:38px 40px 42px;text-align:center}.bonus{padding:32px 40px;background:#f4f1e9;text-align:center}"
+        ".cta a{display:inline-block;padding:20px 34px;border-radius:10px;background:#f05b42;color:#fff;text-decoration:none;font-size:20px;font-weight:bold}.bonus a{display:inline-block;padding:15px 24px;border-radius:9px;background:#17213a;color:#fff;text-decoration:none;font-weight:bold}"
         "@media(max-width:520px){.section,.cta{padding:26px 22px}.header{padding:22px}.groups{border-spacing:5px 0}.group{padding:14px}}"
         "</style></head><body style='margin:0;background:#ece9df;color:#17213a;font-family:Arial,sans-serif;line-height:1.65'>"
         "<table class='shell' role='presentation' style='width:100%;padding:36px 14px;background:#ece9df'><tr><td>"
         "<main class='mail' style='display:block;width:100%;max-width:640px;margin:auto;background:#ffffff;border-radius:20px;overflow:hidden'>"
-        f"<header class='header' style='padding:26px 34px;background:#17213a'><img class='logo' src='{html.escape(logo_url, quote=True)}' alt='Cedz' style='display:block;width:150px;max-width:100%'></header>"
+        f"<header class='header' style='padding:22px 34px;background:#f3c952'><table role='presentation' style='width:100%'><tr><td><img class='logo' src='{html.escape(logo_url, quote=True)}' alt='Cedz' style='display:block;width:150px;max-width:100%'></td><td align='right'><a class='header-link' href='{html.escape(account_url, quote=True)}' style='display:inline-block;padding:10px 13px;border-radius:8px;background:#17213a;color:#ffffff;font-size:12px;font-weight:bold;line-height:1.25;text-align:center;text-decoration:none'>Proposer une<br>nouvelle question</a></td></tr></table></header>"
         f"<section class='section' style='display:block;padding:32px 40px;border-bottom:1px solid #e7e3d9'><p class='eyebrow' style='margin:0 0 12px;color:#d45a45;font-size:12px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase'>T24 · dossier confidentiel</p><h1 style='margin:0;font-size:32px;line-height:1.2'>{html.escape(row['intro_text'] or 'On a parlé de toi.')}</h1></section>"
         f"<section class='section' style='display:block;padding:32px 40px;border-bottom:1px solid #e7e3d9'>{author_photo}<p class='author-copy' style='margin:0;font-size:17px'><strong>{html.escape(row['author_name'])}</strong><br>a parlé de toi.</p></section>"
         f"<section class='section' style='display:block;padding:32px 40px;border-bottom:1px solid #e7e3d9'><p class='eyebrow' style='margin:0 0 12px;color:#d45a45;font-size:12px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase'>La question</p><h2 style='margin:0;font-size:23px;line-height:1.4'>{html.escape(data['question'])}</h2>{detail}</section>"
         f"<section class='section copy' style='display:block;padding:32px 40px;border-bottom:1px solid #e7e3d9'>{final_copy}</section>"
-        f"<section class='cta' style='display:block;padding:34px 40px 40px;text-align:center'><a href='{html.escape(detail_url, quote=True)}' style='display:inline-block;padding:15px 22px;border-radius:9px;background:#ffc83d;color:#17213a;text-decoration:none;font-weight:bold'>Voir le détail et répondre&nbsp;→</a></section>"
+        f"<section class='cta' style='display:block;padding:38px 40px 42px;text-align:center'><p style='margin:0 0 16px;font-size:19px;font-weight:bold'>Tu veux lui répondre ?</p><a href='{html.escape(detail_url, quote=True)}' style='display:inline-block;padding:20px 34px;border-radius:10px;background:#f05b42;color:#fff;text-decoration:none;font-size:20px;font-weight:bold'>Réponds-lui&nbsp;→</a></section>"
+        f"<section class='bonus' style='display:block;padding:32px 40px;background:#f4f1e9;text-align:center'><p class='eyebrow' style='margin:0 0 12px;color:#d45a45;font-size:12px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase'>Aujourd’hui, la question bonus</p><h2 style='margin:0 0 20px;font-size:23px;line-height:1.4'>{html.escape(daily_question)}</h2><a href='{html.escape(account_url, quote=True)}' style='display:inline-block;padding:15px 24px;border-radius:9px;background:#17213a;color:#fff;text-decoration:none;font-weight:bold'>Y répondre&nbsp;→</a></section>"
         "</main></td></tr></table></body></html>"
     )
 
@@ -2076,7 +2094,7 @@ def register_account_api(app: Flask) -> None:
     def create_question_suggestion():
         data = json_body()
         body, question_type = str(data.get("body", "")).strip(), str(data.get("type", "free_text"))
-        required = {"free_text": ("{person}",), "slider": ("{person}",), "compare_two": ("{person1}", "{person2}"), "compare_three": ("{person1}", "{person2}", "{person3}")}
+        required = {"free_text": ("{person}",), "slider": ("{person}",), "compare_two": ("{person1}", "{person2}"), "compare_three": ("{person1}", "{person2}", "{person3}"), "choose_one": ()}
         if not body or len(body) > 300 or question_type not in DAILY_QUESTION_TYPES:
             abort_json(400, "Suggestion invalide.")
         if any(marker not in body for marker in required[question_type]):
@@ -2193,7 +2211,7 @@ def register_admin_api(app: Flask) -> None:
         if status == "approved" and not question_id:
             question_type = str(data.get("type", row["question_type"]))
             body = str(data.get("body", row["body"])).strip()
-            modes = {"free_text":"one_person","slider":"one_person","compare_two":"two_people","compare_three":"three_people"}
+            modes = {"free_text":"one_person","slider":"one_person","compare_two":"two_people","compare_three":"three_people","choose_one":"all_people"}
             if question_type not in DAILY_QUESTION_TYPES or not body or len(body)>300: abort_json(400, "Question invalide.")
             cursor = db.execute(
                 """INSERT INTO questions(title,body,type,category,target_mode,is_active,display_order,created_at,updated_at)

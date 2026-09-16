@@ -52,12 +52,13 @@
     const content = pick(item, 'finalContent', 'final_content', 'content', 'body') || '—';
     const type = typeMeta(pick(item, 'type', 'revelationType', 'revelation_type', 'answerType', 'answer_type'));
     return `<div class="mail-preview mail-type-${type.className}${compact ? ' is-compact' : ''}">
-      <div class="mail-preview-top"><span class="mail-logo">${siteLogoUrl ? `<img src="${esc(siteLogoUrl)}" alt="Cedz">` : 'CEDZ'}</span><span>T24 · DOSSIER CONFIDENTIEL</span></div>
+      <div class="mail-preview-top"><span class="mail-logo">${siteLogoUrl ? `<img src="${esc(siteLogoUrl)}" alt="Cedz">` : 'CEDZ'}</span><span class="mail-suggest-link">Proposer une<br>nouvelle question</span></div>
       <div class="mail-preview-person"><span class="author-face">${avatar(author, authorName)}</span><span><small>${esc(type.label)} pour ${esc(recipientName)}</small><strong>${esc(authorName)} a parlé.</strong></span><b aria-hidden="true">${type.mark}</b></div>
       <p class="mail-intro">${esc(intro)}</p>
       ${question ? `<p class="mail-question">${esc(question)}</p>` : ''}
       ${copyMarkup(content)}
-      <span class="mail-fake-link">Voir le détail et répondre →</span>
+      <div class="mail-preview-cta"><strong>Tu veux lui répondre ?</strong><span>Réponds-lui →</span></div>
+      <div class="mail-preview-bonus"><small>Question bonus du moment</small><strong>Une nouvelle question t'attend.</strong><span>Y répondre →</span></div>
     </div>`;
   }
 
