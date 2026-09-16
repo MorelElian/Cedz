@@ -17,6 +17,8 @@
     <button type="button" aria-selected="true" data-tab="overview">Vue d'ensemble</button>
     <button type="button" aria-selected="false" data-tab="participants">Participants</button>
     <button type="button" aria-selected="false" data-tab="questions">Questions</button>
+    <button type="button" aria-selected="false" data-tab="suggestions">Suggestions</button>
+    <button type="button" aria-selected="false" data-tab="daily">Questions bonus</button>
     <button type="button" aria-selected="false" data-tab="answers">Réponses</button>
     <button type="button" aria-selected="false" data-tab="revelations">Révélations</button>
     <button type="button" aria-selected="false" data-tab="sent">Historique envoyé</button>
@@ -46,6 +48,8 @@
       </form>
     </div>
   </section>
+  <section class="admin-panel" data-panel="suggestions" hidden><div class="panel-toolbar"><div><h2>Suggestions à examiner</h2><p>Approuve-les pour les ajouter à la banque.</p></div></div><div class="answer-list" data-suggestion-list></div></section>
+  <section class="admin-panel" data-panel="daily" hidden><div class="panel-toolbar"><div><h2>Questions bonus en cours</h2><p>Une question par participant. Regénère si besoin.</p></div><button class="button button-secondary button-small" type="button" data-reload-daily>Recharger</button></div><div class="answer-list" data-daily-list></div></section>
 
   <section class="admin-panel" data-panel="participants" hidden>
     <div class="panel-toolbar">
@@ -179,4 +183,4 @@
 </dialog>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script>{% endblock %}

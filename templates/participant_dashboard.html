@@ -12,13 +12,18 @@
     <header class="account-hero">
       <div class="account-avatar" data-account-avatar aria-hidden="true"></div>
       <div><p class="eyebrow">Espace participant</p><h1>Salut <em data-account-name>toi</em>.</h1><p>Tout ce qu'on a osé t'envoyer. Rien de plus.</p></div>
-      <a class="button button-secondary" data-questionnaire-link hidden>Finir mon questionnaire</a>
+      <div class="account-actions"><a class="button button-secondary" data-questionnaire-link hidden>Finir mon questionnaire</a><button class="button button-primary" type="button" data-open-suggestion>Proposer une question</button></div>
     </header>
 
     <section class="account-section" aria-labelledby="latest-title">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Dernière livraison</p><h2 id="latest-title">Fraîchement balancé</h2></div></div>
       <div data-latest-revelation></div>
     </section>
+    <section class="account-section daily-section" data-daily-section hidden>
+      <div class="section-heading compact-heading"><div><p class="eyebrow">Question bonus</p><h2>Question du moment</h2></div></div>
+      <div class="daily-question-card" data-daily-question></div>
+    </section>
+    <dialog class="compact-dialog" data-suggestion-dialog><form method="dialog" class="stack-form" data-suggestion-form><header><p class="eyebrow">Nouveau dossier</p><h2>Proposer une question</h2><p>Elle passera d'abord par le comité.</p></header><label class="field"><span>Type</span><select name="type"><option value="free_text">Réponse libre · une personne</option><option value="compare_two">Choix entre deux personnes</option><option value="compare_three">Choix entre trois personnes</option><option value="slider">Note / curseur · une personne</option></select></label><label class="field"><span>Question</span><textarea name="body" maxlength="300" required placeholder="Que penses-tu de {person} ?"></textarea><small data-suggestion-help>Utilise {person} pour la personne tirée.</small></label><p class="form-note" data-suggestion-status></p><footer class="dialog-actions"><button class="button button-ghost" value="cancel">Annuler</button><button class="button button-primary" type="submit">Envoyer au comité</button></footer></form></dialog>
 
     <section class="account-section" aria-labelledby="ranking-title">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Seulement ce que tu sais déjà</p><h2 id="ranking-title">Ta cote dans le vestiaire</h2></div></div>

@@ -370,6 +370,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .reply-card { margin-top: 3rem; padding: clamp(1.3rem,4vw,2rem); border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255,255,255,.7); }
 .reply-card h2 { font-size: 2rem; }
 .reply-card > blockquote { margin: 1rem 0 0; padding: 1rem; border-left: 5px solid var(--mint); background: rgba(26,169,145,.08); }
+.account-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .6rem; }
+.daily-question-card { padding: 1.2rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); box-shadow: var(--shadow); }
+.daily-question-card > p { margin-bottom: 1rem; font-family: Georgia,serif; font-size: 1.2rem; }
+.daily-question-card form { display: grid; gap: .75rem; }
+.daily-question-card textarea { min-height: 92px; padding: .8rem; border: 1px solid var(--line); border-radius: 9px; resize: vertical; }
+.daily-choices { display: flex; flex-wrap: wrap; gap: .5rem; }
+.daily-choices label { padding: .45rem .7rem; border: 1px solid var(--line); border-radius: 999px; font-weight: 800; }
 
 /* Revelation admin */
 .admin-tabs { scrollbar-width: thin; }

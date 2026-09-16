@@ -12,7 +12,7 @@ import secrets
 import smtplib
 import sqlite3
 import ssl
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.message import EmailMessage
 from email.utils import parseaddr
 from functools import wraps
@@ -340,6 +340,25 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_instances_question ON question_instances(question_id, is_active);
         CREATE INDEX IF NOT EXISTS idx_answers_session ON answers(session_id);
         CREATE INDEX IF NOT EXISTS idx_answers_target ON answers(target_participant_id);
+        CREATE TABLE IF NOT EXISTS question_suggestions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author_participant_id INTEGER NOT NULL REFERENCES participants(id),
+            body TEXT NOT NULL, question_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'submitted',
+            admin_note TEXT, approved_question_id INTEGER REFERENCES questions(id),
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS daily_questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            participant_id INTEGER NOT NULL REFERENCES participants(id),
+            question_id INTEGER NOT NULL REFERENCES questions(id),
+            target_participant_id INTEGER REFERENCES participants(id),
+            target_participant_2_id INTEGER REFERENCES participants(id),
+            target_participant_3_id INTEGER REFERENCES participants(id),
+            rendered_body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
+            available_after TEXT, imported_answer_id INTEGER REFERENCES imported_answers(id),
+            assigned_at TEXT NOT NULL, answered_at TEXT, updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_questions_participant ON daily_questions(participant_id, status);
         CREATE TABLE IF NOT EXISTS site_settings (
             key TEXT PRIMARY KEY,
             value TEXT,
@@ -413,6 +432,9 @@ def init_db() -> None:
             PRIMARY KEY(participant_id, intro_phrase_id)
         );
         """
+    )
+    _db().execute(
+        "UPDATE questions SET title=substr(title, 14) WHERE title LIKE 'Suggestion · %'"
     )
     participant_columns = {row["name"] for row in _db().execute("PRAGMA table_info(participants)")}
     if "profile_photo_url" not in participant_columns:
@@ -864,6 +886,77 @@ def render_question(body: str, people: list[sqlite3.Row]) -> str:
         return body.format(**values)
     except (KeyError, ValueError):
         return body
+
+
+DAILY_QUESTION_TYPES = {"free_text", "compare_two", "compare_three", "slider"}
+
+
+def daily_question_payload(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"], "questionId": row["question_id"], "title": row["title"],
+        "body": row["rendered_body"], "type": row["type"], "category": row["category"],
+        "scaleMin": row["scale_min"], "scaleMax": row["scale_max"],
+        "targets": [{"id": row[key], "displayName": row[f"{key}_name"]}
+                    for key in ("target_participant_id", "target_participant_2_id", "target_participant_3_id")
+                    if row[key] is not None],
+        "status": row["status"], "availableAfter": row["available_after"],
+    }
+
+
+def current_daily_question(participant_id: int, *, force: bool = False, question_id: int | None = None) -> sqlite3.Row | None:
+    db = _db()
+    active = db.execute(
+        """SELECT d.*,q.title,q.type,q.category,q.scale_min,q.scale_max,
+                  p1.display_name target_participant_id_name,p2.display_name target_participant_2_id_name,
+                  p3.display_name target_participant_3_id_name
+           FROM daily_questions d JOIN questions q ON q.id=d.question_id
+           LEFT JOIN participants p1 ON p1.id=d.target_participant_id
+           LEFT JOIN participants p2 ON p2.id=d.target_participant_2_id
+           LEFT JOIN participants p3 ON p3.id=d.target_participant_3_id
+           WHERE d.participant_id=? AND d.status='active' ORDER BY d.id DESC LIMIT 1""", (participant_id,)
+    ).fetchone()
+    if active and not force:
+        return active
+    if active:
+        db.execute("UPDATE daily_questions SET status='replaced',updated_at=? WHERE id=?", (utcnow(), active["id"]))
+    latest = db.execute(
+        "SELECT available_after FROM daily_questions WHERE participant_id=? AND status='answered' ORDER BY answered_at DESC LIMIT 1",
+        (participant_id,),
+    ).fetchone()
+    if not force and latest and latest["available_after"] and latest["available_after"] > utcnow():
+        return None
+    people = db.execute("SELECT id,display_name FROM participants WHERE is_active=1 AND id!=? ORDER BY id", (participant_id,)).fetchall()
+    candidates = db.execute(
+        "SELECT * FROM questions WHERE is_active=1 AND type IN ('free_text','compare_two','compare_three','slider')"
+        + (" AND id=?" if question_id else "") + " ORDER BY id", ((question_id,) if question_id else ())
+    ).fetchall()
+    rng = secrets.SystemRandom()
+    rng.shuffle(candidates)
+    for question in candidates:
+        count = {"free_text": 1, "slider": 1, "compare_two": 2, "compare_three": 3}[question["type"]]
+        if len(people) < count:
+            continue
+        group = rng.sample(people, count)
+        ids = sorted(person["id"] for person in group)
+        seen = db.execute(
+            """SELECT 1 FROM daily_questions WHERE participant_id=? AND question_id=?
+               AND COALESCE(target_participant_id,-1)=? AND COALESCE(target_participant_2_id,-1)=?
+               AND COALESCE(target_participant_3_id,-1)=? AND status!='replaced' LIMIT 1""",
+            (participant_id, question["id"], *(ids + [-1] * (3 - len(ids)))),
+        ).fetchone()
+        if seen and not force:
+            continue
+        ordered = [next(person for person in people if person["id"] == target_id) for target_id in ids]
+        now = utcnow()
+        cursor = db.execute(
+            """INSERT INTO daily_questions(participant_id,question_id,target_participant_id,target_participant_2_id,target_participant_3_id,
+               rendered_body,status,assigned_at,updated_at) VALUES (?,?,?,?,?,?, 'active',?,?)""",
+            (participant_id, question["id"], *(ids + [None] * (3 - len(ids))), render_question(question["body"], ordered), now, now),
+        )
+        db.commit()
+        return current_daily_question(participant_id)
+    db.commit()
+    return None
 
 
 def _valid_active_compare_two_groups(
@@ -1968,12 +2061,63 @@ def register_account_api(app: Flask) -> None:
                 "url": (url_for("questionnaire", session_id=answer_session["id"])
                         if answer_session["status"] != "completed" else None),
             }
+        daily = current_daily_question(participant["id"]) if answer_session and answer_session["status"] == "completed" else None
         return jsonify({
             "csrfToken": csrf_token(), "participant": participant_payload(participant),
             "questionnaire": questionnaire_payload,
             "answers": own_answers, "revelations": received, "rankingStats": ranking_stats, "rankings": ranking_stats,
             "repliesReceived": replies_received,
+            "dailyQuestion": daily_question_payload(daily) if daily else None,
+            "dailyQuestionEnabled": bool(answer_session and answer_session["status"] == "completed"),
         })
+
+    @app.post("/api/account/question-suggestions")
+    @participant_required
+    def create_question_suggestion():
+        data = json_body()
+        body, question_type = str(data.get("body", "")).strip(), str(data.get("type", "free_text"))
+        required = {"free_text": ("{person}",), "slider": ("{person}",), "compare_two": ("{person1}", "{person2}"), "compare_three": ("{person1}", "{person2}", "{person3}")}
+        if not body or len(body) > 300 or question_type not in DAILY_QUESTION_TYPES:
+            abort_json(400, "Suggestion invalide.")
+        if any(marker not in body for marker in required[question_type]):
+            abort_json(400, "Utilise les emplacements indiqués pour ce type de question.")
+        now = utcnow()
+        cursor = _db().execute(
+            "INSERT INTO question_suggestions(author_participant_id,body,question_type,created_at,updated_at) VALUES (?,?,?,?,?)",
+            (g.current_participant["id"], body, question_type, now, now),
+        )
+        _db().commit()
+        return jsonify({"id": cursor.lastrowid, "submitted": True}), 201
+
+    @app.post("/api/account/daily-question/<int:daily_id>/answer")
+    @participant_required
+    def answer_daily_question(daily_id: int):
+        db = _db()
+        row = db.execute(
+            """SELECT d.*,q.title,q.type,q.category,q.scale_min,q.scale_max,q.allow_self_target
+               FROM daily_questions d JOIN questions q ON q.id=d.question_id
+               WHERE d.id=? AND d.participant_id=? AND d.status='active'""",
+            (daily_id, g.current_participant["id"]),
+        ).fetchone()
+        if not row:
+            abort_json(404, "Question du jour introuvable.")
+        targets = [row[key] for key in ("target_participant_id", "target_participant_2_id", "target_participant_3_id") if row[key] is not None]
+        text, number, structured = validate_answer(row, json_body().get("answer"), targets)
+        now = utcnow()
+        cursor = db.execute(
+            """INSERT INTO imported_answers(source_key,author_participant_id,target_participant_id,question_id,question_title,
+               rendered_question,question_type,answer_text,answer_number,answer_json,is_active,imported_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?)""",
+            (f"daily:{daily_id}", g.current_participant["id"], targets[0] if targets else None, row["question_id"],
+             row["title"], row["rendered_body"], row["type"], text, number,
+             json.dumps(structured, ensure_ascii=False) if structured is not None else None, 1, now, now),
+        )
+        available_after = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(timespec="seconds")
+        db.execute("UPDATE daily_questions SET status='answered',imported_answer_id=?,answered_at=?,available_after=?,updated_at=? WHERE id=?",
+                   (cursor.lastrowid, now, available_after, now, daily_id))
+        generate_revelation_candidates(commit=False)
+        db.commit()
+        return jsonify({"saved": True, "nextAvailableAt": available_after})
 
     @app.get("/api/account/revelations/<int:revelation_id>")
     @participant_required
@@ -2028,6 +2172,62 @@ def register_account_api(app: Flask) -> None:
 
 
 def register_admin_api(app: Flask) -> None:
+    @app.get("/api/admin/question-suggestions")
+    @admin_required
+    def admin_question_suggestions():
+        rows = _db().execute(
+            """SELECT s.*,p.display_name author_name FROM question_suggestions s
+               JOIN participants p ON p.id=s.author_participant_id ORDER BY s.created_at DESC"""
+        ).fetchall()
+        return jsonify({"suggestions": [dict(id=row["id"], authorName=row["author_name"], body=row["body"],
+                      type=row["question_type"], status=row["status"], adminNote=row["admin_note"]) for row in rows]})
+
+    @app.patch("/api/admin/question-suggestions/<int:suggestion_id>")
+    @admin_required
+    def admin_update_question_suggestion(suggestion_id: int):
+        db = _db(); row = db.execute("SELECT * FROM question_suggestions WHERE id=?", (suggestion_id,)).fetchone()
+        if not row: abort_json(404, "Suggestion introuvable.")
+        data, status = json_body(), str(json_body().get("status", row["status"]))
+        if status not in {"approved", "rejected"}: abort_json(400, "Statut invalide.")
+        question_id = row["approved_question_id"]
+        if status == "approved" and not question_id:
+            question_type = str(data.get("type", row["question_type"]))
+            body = str(data.get("body", row["body"])).strip()
+            modes = {"free_text":"one_person","slider":"one_person","compare_two":"two_people","compare_three":"three_people"}
+            if question_type not in DAILY_QUESTION_TYPES or not body or len(body)>300: abort_json(400, "Question invalide.")
+            cursor = db.execute(
+                """INSERT INTO questions(title,body,type,category,target_mode,is_active,display_order,created_at,updated_at)
+                   VALUES (?,?,?,?,?,1,999,?,?)""",
+                (body[:150], body, question_type, "Questions du jour", modes[question_type], utcnow(), utcnow()),
+            ); question_id = cursor.lastrowid
+        db.execute("UPDATE question_suggestions SET status=?,admin_note=?,approved_question_id=?,updated_at=? WHERE id=?",
+                   (status, str(data.get("adminNote", "")).strip() or None, question_id, utcnow(), suggestion_id))
+        db.commit()
+        return jsonify({"updated": True, "questionId": question_id})
+
+    @app.get("/api/admin/daily-questions")
+    @admin_required
+    def admin_daily_questions():
+        people = _db().execute("SELECT id,display_name FROM participants WHERE is_active=1 ORDER BY display_name").fetchall()
+        items=[]
+        for person in people:
+            row=current_daily_question(person["id"])
+            items.append({"participantId":person["id"],"participantName":person["display_name"],
+                          "question":daily_question_payload(row) if row else None})
+        return jsonify({"dailyQuestions":items})
+
+    @app.post("/api/admin/daily-questions/<int:participant_id>/regenerate")
+    @admin_required
+    def admin_regenerate_daily_question(participant_id: int):
+        if not _db().execute("SELECT 1 FROM participants WHERE id=? AND is_active=1", (participant_id,)).fetchone():
+            abort_json(404, "Participant introuvable.")
+        data=json_body()
+        try: question_id=int(data["questionId"]) if data.get("questionId") else None
+        except (TypeError,ValueError): abort_json(400, "Question invalide.")
+        row=current_daily_question(participant_id,force=True,question_id=question_id)
+        if not row: abort_json(409, "Aucune question compatible.")
+        return jsonify({"question":daily_question_payload(row)})
+
     @app.get("/api/admin/csrf")
     @admin_required
     def admin_csrf():
