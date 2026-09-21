@@ -233,6 +233,44 @@ def test_import_rebuilds_sessions_progress_and_fresh_database_emails(client, app
     assert questions["totalCount"] == 30
 
 
+def test_completed_participant_can_review_and_update_answers(client, app):
+    csrf = admin_login(client)
+    participant = next(
+        person for person in client.get("/api/admin/participants").get_json()["participants"]
+        if person["displayName"] == "Barbs"
+    )
+    set_password(client, csrf, participant["id"])
+    participant_csrf = participant_login(client, "Barbs")
+    dashboard = client.get("/api/account/dashboard").get_json()
+    questionnaire = dashboard["questionnaire"]
+    assert questionnaire["completed"] is True
+    assert questionnaire["reviewUrl"].endswith("?review=1")
+    session_id = questionnaire["sessionId"]
+    assert client.get(questionnaire["reviewUrl"]).status_code == 200
+    assert client.get(f"/api/sessions/{session_id}/questions").status_code == 403
+
+    review = client.get(f"/api/sessions/{session_id}/questions?review=1").get_json()
+    assert review["reviewMode"] is True
+    assert len(review["questions"]) == review["totalCount"] == 30
+    question = next(item for item in review["questions"] if item["type"] == "free_text")
+    changed_answer = "Réponse modifiée depuis mon espace."
+    saved = client.post(
+        f"/api/sessions/{session_id}/answers?review=1",
+        json={"questionInstanceId": question["instanceId"], "answer": changed_answer},
+        headers=participant_csrf,
+    )
+    assert saved.status_code == 200
+    refreshed = client.get(f"/api/sessions/{session_id}/questions?review=1").get_json()
+    assert refreshed["answersByInstance"][str(question["instanceId"])] == changed_answer
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        answer = db.execute(
+            """SELECT answer_text FROM imported_answers
+               WHERE source_session_id=? AND question_title=? AND rendered_question=?""",
+            (session_id, question["title"], question["body"]),
+        ).fetchone()
+    assert answer[0] == changed_answer
+
+
 def test_admin_overview_aggregates_imported_answers_without_duplicates(client):
     admin_login(client)
     answers = client.get("/api/admin/answers").get_json()["answers"]

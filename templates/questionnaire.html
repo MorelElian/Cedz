@@ -21,15 +21,16 @@
 {% endblock %}
 
 {% block content %}
-<section class="questionnaire" data-questionnaire data-session-id="{{ session_id }}">
+<section class="questionnaire" data-questionnaire data-session-id="{{ session_id }}" data-review-mode="{{ 'true' if review_mode else 'false' }}">
   <header class="questionnaire-head">
     <div>
-      <p class="eyebrow">Questionnaire</p>
-      <h1>À toi.</h1>
+      <p class="eyebrow">{% if review_mode %}Tes réponses{% else %}Questionnaire{% endif %}</p>
+      <h1>{% if review_mode %}Tu peux tout refaire.{% else %}À toi.{% endif %}</h1>
     </div>
     <div class="progress-copy"><strong data-progress-current>0</strong><span>/</span><span data-progress-total>0</span></div>
   </header>
   <div class="progress-track" role="progressbar" aria-label="Progression du questionnaire" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-progress-track><span data-progress-bar></span></div>
+  <nav class="review-question-list" data-review-question-list aria-label="Liste des réponses" hidden><label><span>Aller à une réponse</span><select data-review-question-select></select></label></nav>
 
   <div class="question-stage" data-question-stage aria-live="polite" aria-busy="true">
     <div class="loading-state">

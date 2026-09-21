@@ -451,6 +451,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .phrase-column > header { display: flex; justify-content: space-between; align-items: center; }.phrase-column h3 { margin: 0; }.phrase-column > header span { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--yellow); font-weight: 900; }
 .phrase-card { display: flex; align-items: start; gap: .7rem; padding: .9rem 0; border-bottom: 1px solid var(--line); }.phrase-card p { flex: 1; margin: 0; }.phrase-card footer { display: flex; gap: .3rem; }.icon-button.is-danger { color: var(--coral-dark); }
 .empty-copy { color: var(--muted); }
+.review-question-list { margin: 1.25rem 0; }
+.review-question-list label { display: grid; gap: .35rem; color: var(--muted); font-size: .78rem; font-weight: 900; }
+.review-question-list select { width: 100%; min-height: 46px; padding: .65rem .8rem; border: 1px solid var(--navy); border-radius: 9px; color: var(--navy); background: white; font: inherit; font-weight: 800; }
 
 @media (max-width: 800px) {
   .account-hero { grid-template-columns: auto 1fr; }

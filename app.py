@@ -1352,6 +1352,57 @@ def session_answer_values(session_id: str, question_rows: list[sqlite3.Row]) -> 
     return result
 
 
+def sync_reviewed_answer_to_imported(
+    answer_session: sqlite3.Row,
+    instance: sqlite3.Row,
+    *,
+    text: str | None,
+    number: float | None,
+    structured: Any,
+    now: str,
+) -> None:
+    """Keep the editable questionnaire answer as the source of future revelations."""
+    db = _db()
+    target_ids = [
+        instance[key] for key in ("target_participant_id", "target_participant_2_id", "target_participant_3_id")
+        if instance[key] is not None
+    ]
+    existing = db.execute(
+        """SELECT id FROM imported_answers
+           WHERE source_session_id=?
+             AND (question_instance_id=? OR (question_title=? AND rendered_question=?))
+           ORDER BY id LIMIT 1""",
+        (answer_session["id"], instance["id"], instance["title"], instance["rendered_body"]),
+    ).fetchone()
+    values = (
+        answer_session["participant_id"], target_ids[0] if target_ids else None,
+        instance["question_id"], instance["id"], instance["title"], instance["rendered_body"], instance["type"],
+        text, number, json.dumps(structured, ensure_ascii=False) if structured is not None else None, now,
+    )
+    if existing:
+        imported_id = existing["id"]
+        db.execute(
+            """UPDATE imported_answers SET author_participant_id=?,target_participant_id=?,question_id=?,
+               question_instance_id=?,question_title=?,rendered_question=?,question_type=?,answer_text=?,
+               answer_number=?,answer_json=?,is_active=1,updated_at=? WHERE id=?""",
+            (*values, imported_id),
+        )
+    else:
+        cursor = db.execute(
+            """INSERT INTO imported_answers(source_key,source_session_id,author_participant_id,target_participant_id,
+               question_id,question_instance_id,question_title,rendered_question,question_type,answer_text,
+               answer_number,answer_json,is_active,source_created_at,imported_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)""",
+            (
+                f"review:{answer_session['id']}:instance:{instance['id']}", answer_session["id"], *values[:-1],
+                now, now, now,
+            ),
+        )
+        imported_id = cursor.lastrowid
+    db.execute("DELETE FROM revelations WHERE imported_answer_id=? AND status!='sent'", (imported_id,))
+    generate_revelation_candidates(commit=False)
+
+
 def register_routes(app: Flask) -> None:
     @app.get("/health")
     def health():
@@ -1425,9 +1476,13 @@ def register_routes(app: Flask) -> None:
     @participant_required
     def questionnaire(session_id: str):
         answer_session = get_answer_session(session_id)
-        require_session_owner(answer_session)
+        review_mode = request.args.get("review") == "1"
+        require_session_owner(answer_session, allow_completed=review_mode)
         participant = _db().execute("SELECT * FROM participants WHERE id = ?", (answer_session["participant_id"],)).fetchone()
-        return render_template("questionnaire.html", session_id=session_id, current_participant=participant_payload(participant))
+        return render_template(
+            "questionnaire.html", session_id=session_id, current_participant=participant_payload(participant),
+            review_mode=review_mode,
+        )
 
     @app.get("/merci")
     def merci():
@@ -1530,7 +1585,8 @@ def register_routes(app: Flask) -> None:
     @app.get("/api/sessions/<session_id>/questions")
     def session_questions(session_id: str):
         answer_session = get_answer_session(session_id)
-        require_session_owner(answer_session)
+        review_mode = request.args.get("review") == "1"
+        require_session_owner(answer_session, allow_completed=review_mode)
         rows = session_question_rows(session_id, answer_session["participant_id"])
         participants = _db().execute("SELECT * FROM participants WHERE is_active = 1 ORDER BY display_name").fetchall()
         questions = []
@@ -1546,25 +1602,27 @@ def register_routes(app: Flask) -> None:
         saved_values = session_answer_values(session_id, rows)
         remaining_questions = [item for item in questions if item["instanceId"] not in saved_values]
         return jsonify({
-            "questions": remaining_questions,
+            "questions": questions if review_mode else remaining_questions,
             "participants": [participant_payload(row) for row in participants],
             "answersByInstance": {str(key): value for key, value in saved_values.items()},
             "answeredCount": len(saved_values),
-            "remainingCount": len(remaining_questions),
+            "remainingCount": 0 if review_mode else len(remaining_questions),
             "totalCount": len(rows),
+            "reviewMode": review_mode,
         })
 
     @app.post("/api/sessions/<session_id>/answers")
     def save_answer(session_id: str):
         answer_session = get_answer_session(session_id)
-        require_session_owner(answer_session)
+        review_mode = request.args.get("review") == "1"
+        require_session_owner(answer_session, allow_completed=review_mode)
         data = json_body()
         try:
             instance_id = int(data.get("questionInstanceId"))
         except (TypeError, ValueError):
             abort_json(400, "Question invalide.")
         instance = _db().execute(
-            """SELECT qi.*, q.type, q.scale_min, q.scale_max, q.allow_self_target
+            """SELECT qi.*, q.title, q.type, q.scale_min, q.scale_max, q.allow_self_target
                FROM question_instances qi JOIN questions q ON q.id = qi.question_id
                WHERE qi.id = ? AND qi.is_active = 1 AND q.is_active = 1""", (instance_id,),
         ).fetchone()
@@ -1591,6 +1649,10 @@ def register_routes(app: Flask) -> None:
              text, number, json.dumps(structured, ensure_ascii=False) if structured is not None else None, now, now),
         )
         _db().execute("UPDATE answer_sessions SET updated_at = ? WHERE id = ?", (now, session_id))
+        if review_mode and answer_session["status"] == "completed":
+            sync_reviewed_answer_to_imported(
+                answer_session, instance, text=text, number=number, structured=structured, now=now,
+            )
         _db().commit()
         return jsonify({"saved": True})
 
@@ -2137,6 +2199,10 @@ def register_account_api(app: Flask) -> None:
                 "totalCount": len(question_rows),
                 "url": (url_for("questionnaire", session_id=answer_session["id"])
                         if answer_session["status"] != "completed" else None),
+                "reviewUrl": (
+                    url_for("questionnaire", session_id=answer_session["id"], review=1)
+                    if answer_session["status"] == "completed" else None
+                ),
             }
         daily = current_daily_question(participant["id"]) if answer_session and answer_session["status"] == "completed" else None
         return jsonify({

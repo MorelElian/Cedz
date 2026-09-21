@@ -129,6 +129,12 @@
         link.textContent = Number.isFinite(remainingCount) ? `Continuer · ${remainingCount} question${remainingCount > 1 ? 's' : ''}` : 'Continuer le questionnaire';
         link.hidden = false;
       }
+      const reviewLink = app.querySelector('[data-review-answers]');
+      const reviewUrl = pick(questionnaire, 'reviewUrl', 'review_url');
+      if (reviewUrl) {
+        reviewLink.href = reviewUrl;
+        reviewLink.hidden = false;
+      }
       app.querySelector('[data-account-loading]').hidden = true;
       app.querySelector('[data-account-content]').hidden = false;
     } catch (_) {

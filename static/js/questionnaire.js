@@ -3,6 +3,7 @@
   if (!app) return;
 
   const sessionId = app.dataset.sessionId;
+  const reviewMode = app.dataset.reviewMode === 'true';
   const stage = app.querySelector('[data-question-stage]');
   const nav = app.querySelector('[data-question-nav]');
   const previous = app.querySelector('[data-previous]');
@@ -16,6 +17,8 @@
   const errorTemplate = document.querySelector('#error-template');
   const quote = document.querySelector('[data-question-quote]');
   const quoteSource = document.querySelector('[data-question-quote-source]');
+  const reviewList = app.querySelector('[data-review-question-list]');
+  const reviewSelect = app.querySelector('[data-review-question-select]');
   const quotes = [
     {text: 'Il faut avoir de la persévérance, et surtout de la confiance en soi.', author: 'Marie Curie', url: 'https://fr.wikiquote.org/wiki/Marie_Curie'},
     {text: "Le génie n'est qu'une plus grande aptitude à la patience.", author: 'Buffon', url: 'https://fr.wikiquote.org/wiki/Patience'},
@@ -34,17 +37,18 @@
   const candidatesOf = question => {
     const explicit = question.options || question.participants || question.targets || question.target_participants;
     if (explicit?.length) return explicit;
-    if (question.type === 'ranking' || question.type === 'binary_split') return participants;
+    if (question.type === 'ranking' || question.type === 'binary_split' || question.type === 'choose_one') return participants;
     const targetIds = (question.targetParticipantIds || []).map(String);
     return participants.filter(person => targetIds.includes(String(idOf(person))));
   };
   const questionId = question => question.questionInstanceId || question.instanceId || question.question_instance_id || question.instance_id || question.id;
-  const typeLabels = {free_text: 'Réponse libre', single_person_answer: 'Portrait-robot', compare_two: 'Duel', compare_three: 'Match à trois', ranking: 'Classement', binary_split: 'Deux camps', slider: 'Curseur'};
+  const typeLabels = {free_text: 'Réponse libre', single_person_answer: 'Portrait-robot', choose_one: 'Choisis quelqu’un', compare_two: 'Duel', compare_three: 'Match à trois', ranking: 'Classement', binary_split: 'Deux camps', slider: 'Curseur'};
 
   async function load() {
     stage.setAttribute('aria-busy', 'true');
     try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/questions`, {headers: {'Accept':'application/json'}});
+      const reviewQuery = reviewMode ? '?review=1' : '';
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/questions${reviewQuery}`, {headers: {'Accept':'application/json'}});
       if (!response.ok) throw new Error();
       const payload = await response.json();
       questions = unwrap(payload, 'questions');
@@ -54,6 +58,12 @@
       else Object.entries(existing).forEach(([instanceId, answer]) => answers.set(String(instanceId), answer));
       index = Math.max(0, Number(payload.current_index || payload.data?.current_index || 0));
       totalLabel.textContent = questions.length;
+      if (reviewMode) {
+        reviewList.hidden = false;
+        previous.hidden = true;
+        nav.querySelector('.keyboard-hint')?.setAttribute('hidden', '');
+        renderReviewList();
+      }
       if (!questions.length && Number(payload.remainingCount ?? payload.remaining_count) === 0) return complete();
       if (!questions.length) return showEmpty();
       nav.hidden = false;
@@ -91,8 +101,23 @@
     renderQuote(index);
     previous.disabled = index === 0;
     next.disabled = false;
-    next.innerHTML = index === questions.length - 1 ? 'Terminer <span aria-hidden="true">✓</span>' : 'Suivante <span aria-hidden="true">→</span>';
+    next.innerHTML = reviewMode
+      ? 'Enregistrer <span aria-hidden="true">✓</span>'
+      : (index === questions.length - 1 ? 'Terminer <span aria-hidden="true">✓</span>' : 'Suivante <span aria-hidden="true">→</span>');
+    if (reviewMode) renderReviewList();
     stage.querySelector('textarea, input, button:not([draggable="true"])')?.focus({preventScroll: true});
+  }
+
+  function renderReviewList() {
+    if (!reviewMode || !reviewSelect) return;
+    reviewSelect.replaceChildren(...questions.map((question, questionIndex) => {
+      const body = question.rendered_body || question.body || question.question || question.title || 'Question';
+      const option = document.createElement('option');
+      option.value = String(questionIndex);
+      option.textContent = `${questionIndex + 1}. ${body}`;
+      option.selected = questionIndex === index;
+      return option;
+    }));
   }
 
   function renderQuote(questionIndex) {
@@ -113,7 +138,7 @@
     if (type === 'slider') return buildSlider(question, saved);
     if (type === 'ranking') return buildRanking(question, saved);
     if (type === 'binary_split') return buildSplit(question, saved);
-    if (type === 'compare_two' || type === 'compare_three') return buildChoice(question, saved, true);
+    if (type === 'compare_two' || type === 'compare_three' || type === 'choose_one') return buildChoice(question, saved, true);
     const textarea = document.createElement('textarea');
     textarea.name = 'answer_text'; textarea.placeholder = 'Ta réponse…'; textarea.maxLength = 2000;
     textarea.value = typeof saved === 'string' ? saved : saved?.answer_text || '';
@@ -282,14 +307,14 @@
       const category_b=[...form.querySelectorAll('[data-category="b"] .split-person')].map(card => card.dataset.id);
       return {answer_json:{category_a,category_b}};
     }
-    if (question.type === 'compare_two' || question.type === 'compare_three') return {answer_json:{selected_participant_id:form.elements.selected_participant_id?.value || '',comment:form.elements.comment?.value.trim() || ''}};
+    if (question.type === 'compare_two' || question.type === 'compare_three' || question.type === 'choose_one') return {answer_json:{selected_participant_id:form.elements.selected_participant_id?.value || '',comment:form.elements.comment?.value.trim() || ''}};
     if (question.type === 'slider') return {answer_number:Number(form.elements.answer_number.value)};
     return {answer_text:form.elements.answer_text?.value.trim() || ''};
   }
 
   function valid() {
     const question=questions[index], answer=readAnswer(), error=stage.querySelector('.form-error'); let ok=true;
-    if (question.type === 'compare_two' || question.type === 'compare_three') ok=Boolean(answer.answer_json.selected_participant_id);
+    if (question.type === 'compare_two' || question.type === 'compare_three' || question.type === 'choose_one') ok=Boolean(answer.answer_json.selected_participant_id);
     else if (question.type === 'binary_split') ok=answer.answer_json.category_a.length + answer.answer_json.category_b.length === candidatesOf(question).length;
     else if (question.type === 'ranking') ok=Boolean(answer.answer_json.lap_time);
     else if (question.type !== 'ranking' && question.type !== 'slider') ok=Boolean(answer.answer_text);
@@ -312,14 +337,15 @@
     const question=questions[index], answer=readAnswer();
     try {
       let answerValue = answer.answer_json ?? answer.answer_number ?? answer.answer_text;
-      if (question.type === 'compare_two' || question.type === 'compare_three') {
+      if (question.type === 'compare_two' || question.type === 'compare_three' || question.type === 'choose_one') {
         answerValue = {selectedParticipantId: answerValue.selected_participant_id, comment: answerValue.comment};
       } else if (question.type === 'ranking') {
         answerValue = {orderedParticipantIds: answerValue.ordered_participant_ids, lapTime: answerValue.lap_time};
       } else if (question.type === 'binary_split') {
         answerValue = {categoryA: answerValue.category_a, categoryB: answerValue.category_b};
       }
-      const response=await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/answers`,{method:'POST',headers:{'Accept':'application/json','Content-Type':'application/json'},body:JSON.stringify({question_instance_id:questionId(question),questionInstanceId:questionId(question),answer:answerValue,...answer})});
+      const reviewQuery = reviewMode ? '?review=1' : '';
+      const response=await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/answers${reviewQuery}`,{method:'POST',headers:{'Accept':'application/json','Content-Type':'application/json'},body:JSON.stringify({question_instance_id:questionId(question),questionInstanceId:questionId(question),answer:answerValue,...answer})});
       if (!response.ok) throw new Error();
       answers.set(String(questionId(question)),answer.answer_json ?? answer.answer_number ?? answer.answer_text); setSaveStatus('idle','Réponse sauvegardée'); return true;
     } catch (_) { setSaveStatus('error','Sauvegarde impossible'); stage.querySelector('.form-error').textContent='La réponse n’a pas pu être sauvegardée. Réessaie.'; stage.querySelector('.form-error').hidden=false; return false; }
@@ -342,7 +368,30 @@
     catch (_) { setSaveStatus('error','Finalisation impossible'); next.disabled=false; previous.disabled=false; }
   }
 
-  previous.addEventListener('click',()=>go(-1)); next.addEventListener('click',()=>go(1));
+  async function saveAndReload() {
+    clearTimeout(saveTimer);
+    next.disabled = true;
+    if (await save(true)) {
+      setSaveStatus('idle', 'Réponse enregistrée');
+      window.setTimeout(() => window.location.reload(), 250);
+      return;
+    }
+    next.disabled = false;
+  }
+
+  previous.addEventListener('click',()=>go(-1)); next.addEventListener('click',()=>reviewMode ? saveAndReload() : go(1));
+  reviewSelect?.addEventListener('change', async event => {
+    const nextIndex = Number(event.currentTarget.value);
+    if (!Number.isInteger(nextIndex) || nextIndex === index) return;
+    clearTimeout(saveTimer);
+    if (!valid() || !(await save(false))) {
+      event.currentTarget.value = String(index);
+      return;
+    }
+    index = nextIndex;
+    render();
+    window.scrollTo({top: app.offsetTop - 20, behavior: 'smooth'});
+  });
   document.addEventListener('keydown',event=>{ if(event.ctrlKey && event.key==='Enter'){event.preventDefault();go(1);} });
   load();
 })();
