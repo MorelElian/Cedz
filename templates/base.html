@@ -15,7 +15,7 @@
   <a class="skip-link" href="#main">Aller au contenu</a>
   <div class="site-shell">
     <header class="site-header">
-      <a class="brand" href="{{ url_for('index') if request.endpoint else '/' }}" aria-label="Cedz Are Shooting, retour à l'accueil">
+      <a class="brand" href="{{ url_for('account_page') if session.get('participant_id') else (url_for('index') if request.endpoint else '/') }}" aria-label="Cedz Are Shooting, retour à l'accueil">
         {% if site_logo_url %}<img class="brand-logo" src="{{ site_logo_url }}" alt="">{% else %}<span class="brand-mark" aria-hidden="true">C</span>{% endif %}
         <span><strong>CEDZ</strong><small>Are Shooting</small></span>
       </a>

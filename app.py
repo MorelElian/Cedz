@@ -22,6 +22,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -220,6 +221,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             "T24_MAIL_FROM", os.environ.get("T24_GMAIL_USER", os.environ.get("T24_SMTP_USER", ""))
         ),
         PUBLIC_BASE_URL=os.environ.get("T24_PUBLIC_BASE_URL", "").strip().rstrip("/"),
+        DAILY_SCHEDULER_TOKEN=os.environ.get("T24_DAILY_SCHEDULER_TOKEN", ""),
         SMTP_TIMEOUT=20,
         MAX_CONTENT_LENGTH=6_000_000,
         SESSION_COOKIE_HTTPONLY=True,
@@ -360,6 +362,17 @@ def init_db() -> None:
             assigned_at TEXT NOT NULL, answered_at TEXT, updated_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_daily_questions_participant ON daily_questions(participant_id, status);
+        CREATE TABLE IF NOT EXISTS daily_question_mail_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            daily_question_id INTEGER NOT NULL UNIQUE REFERENCES daily_questions(id),
+            participant_id INTEGER NOT NULL REFERENCES participants(id),
+            recipient_email TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            html_snapshot TEXT NOT NULL,
+            delivery_mode TEXT NOT NULL,
+            sent_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_mail_deliveries_participant ON daily_question_mail_deliveries(participant_id);
         CREATE TABLE IF NOT EXISTS site_settings (
             key TEXT PRIMARY KEY,
             value TEXT,
@@ -918,9 +931,8 @@ def daily_question_payload(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def current_daily_question(participant_id: int, *, force: bool = False, question_id: int | None = None) -> sqlite3.Row | None:
-    db = _db()
-    active = db.execute(
+def active_daily_question(participant_id: int) -> sqlite3.Row | None:
+    return _db().execute(
         """SELECT d.*,q.title,q.type,q.category,q.scale_min,q.scale_max,
                   p1.display_name target_participant_id_name,p2.display_name target_participant_2_id_name,
                   p3.display_name target_participant_3_id_name
@@ -930,6 +942,14 @@ def current_daily_question(participant_id: int, *, force: bool = False, question
            LEFT JOIN participants p3 ON p3.id=d.target_participant_3_id
            WHERE d.participant_id=? AND d.status='active' ORDER BY d.id DESC LIMIT 1""", (participant_id,)
     ).fetchone()
+
+
+def current_daily_question(
+    participant_id: int, *, force: bool = False, question_id: int | None = None,
+    ignore_answer_cooldown: bool = False,
+) -> sqlite3.Row | None:
+    db = _db()
+    active = active_daily_question(participant_id)
     if active and not force:
         return active
     if active:
@@ -938,7 +958,8 @@ def current_daily_question(participant_id: int, *, force: bool = False, question
         "SELECT available_after FROM daily_questions WHERE participant_id=? AND status='answered' ORDER BY answered_at DESC LIMIT 1",
         (participant_id,),
     ).fetchone()
-    if not force and latest and latest["available_after"] and latest["available_after"] > utcnow():
+    if (not force and not ignore_answer_cooldown and latest and latest["available_after"]
+            and latest["available_after"] > utcnow()):
         return None
     people = db.execute("SELECT id,display_name FROM participants WHERE is_active=1 AND id!=? ORDER BY id", (participant_id,)).fetchall()
     candidates = db.execute(
@@ -972,6 +993,30 @@ def current_daily_question(participant_id: int, *, force: bool = False, question
         return current_daily_question(participant_id)
     db.commit()
     return None
+
+
+def previous_daily_questions(participant_id: int) -> list[sqlite3.Row]:
+    """Unanswered bonus questions that remain answerable after the next cycle."""
+    return _db().execute(
+        """SELECT d.*,q.title,q.type,q.category,q.scale_min,q.scale_max,
+                  p1.display_name target_participant_id_name,p2.display_name target_participant_2_id_name,
+                  p3.display_name target_participant_3_id_name
+           FROM daily_questions d JOIN questions q ON q.id=d.question_id
+           LEFT JOIN participants p1 ON p1.id=d.target_participant_id
+           LEFT JOIN participants p2 ON p2.id=d.target_participant_2_id
+           LEFT JOIN participants p3 ON p3.id=d.target_participant_3_id
+           WHERE d.participant_id=? AND d.status='previous' ORDER BY d.assigned_at DESC, d.id DESC""",
+        (participant_id,),
+    ).fetchall()
+
+
+def completed_daily_participants() -> list[sqlite3.Row]:
+    return _db().execute(
+        """SELECT p.* FROM participants p
+           WHERE p.is_active=1 AND EXISTS (
+               SELECT 1 FROM answer_sessions s WHERE s.participant_id=p.id AND s.status='completed'
+           ) ORDER BY p.id"""
+    ).fetchall()
 
 
 def _valid_active_compare_two_groups(
@@ -1424,6 +1469,14 @@ def register_routes(app: Flask) -> None:
     def index():
         return render_template("index.html")
 
+    @app.post("/api/jobs/daily-question-mails")
+    def scheduled_daily_question_mails():
+        expected = str(current_app.config["DAILY_SCHEDULER_TOKEN"])
+        provided = request.headers.get("X-Cedz-Scheduler-Token", "")
+        if not expected or not secrets.compare_digest(provided, expected):
+            abort_json(404, "Introuvable.")
+        return jsonify(run_daily_question_mailer())
+
     @app.route("/login", methods=["GET", "POST"])
     def participant_login():
         error = None
@@ -1812,7 +1865,7 @@ def render_reply_notification_email(row: sqlite3.Row, reply_message: str) -> str
     logo_path = logo_row["value"] if logo_row and logo_row["value"] else url_for("project_logo")
     logo_url = ((public_base or request.url_root.rstrip("/")) + logo_path
                 if logo_path.startswith("/") else logo_path)
-    question = html.escape(str(content.get("question", "")))
+    question = html.escape(str(content.get("question", "")), quote=False)
     original_answer = html.escape(revelation_answer_summary(row))
     recipient_name = html.escape(row["recipient_name"])
     reply = html.escape(reply_message)
@@ -1921,6 +1974,40 @@ class MailDeliveryError(RuntimeError):
     pass
 
 
+def render_daily_question_email(participant: sqlite3.Row, question: sqlite3.Row) -> str:
+    """The standalone reminder email for one active bonus question."""
+    public_base = str(current_app.config.get("PUBLIC_BASE_URL", "")).rstrip("/")
+    account_path = url_for("account_page")
+    account_url = public_base + account_path if public_base else url_for("account_page", _external=True)
+    logo_row = _db().execute("SELECT value FROM site_settings WHERE key='logo_url'").fetchone()
+    logo_path = logo_row["value"] if logo_row and logo_row["value"] else url_for("project_logo")
+    logo_url = ((public_base or request.url_root.rstrip("/")) + logo_path
+                if logo_path.startswith("/") else logo_path)
+    name = html.escape(participant["display_name"])
+    body = html.escape(question["rendered_body"])
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'><style>"
+        "body{margin:0;background:#ece9df;color:#17213a;font-family:Arial,sans-serif;line-height:1.6}"
+        ".shell{width:100%;padding:36px 14px}.mail{width:100%;max-width:640px;margin:auto;background:#fff;border-radius:20px;overflow:hidden}"
+        ".header{padding:22px 34px;background:#f3c952}.logo{display:block;width:150px;max-width:100%}"
+        ".section{padding:34px 40px}.eyebrow{margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase}"
+        "h1{margin:0;font-size:32px;line-height:1.2}.question{margin:22px 0;padding:20px;border-left:4px solid #ffc83d;background:#f4f1e9;font-size:21px;font-weight:bold;line-height:1.45}.cta{display:inline-block;padding:15px 20px;border-radius:9px;background:#f05b42;color:#fff;text-decoration:none;font-size:17px;font-weight:bold}"
+        "@media(max-width:520px){.shell{padding:16px 8px}.section{padding:26px 22px}h1{font-size:27px}.question{font-size:18px}}"
+        "</style></head><body style='margin:0;background:#ece9df;color:#17213a;font-family:Arial,sans-serif;line-height:1.6'>"
+        "<table class='shell' role='presentation' style='width:100%;padding:36px 14px;background:#ece9df'><tr><td>"
+        "<main class='mail' style='display:block;width:100%;max-width:640px;margin:auto;background:#ffffff;border-radius:20px;overflow:hidden'>"
+        f"<header class='header' style='padding:22px 34px;background:#f3c952'><img class='logo' src='{html.escape(logo_url, quote=True)}' alt='Cedz' style='display:block;width:150px;max-width:100%'></header>"
+        f"<section class='section' style='display:block;padding:34px 40px'><p class='eyebrow' style='margin:0 0 10px;color:#d45a45;font-size:11px;font-weight:bold;letter-spacing:1.3px;text-transform:uppercase'>Question bonus</p><h1 style='margin:0;font-size:32px;line-height:1.2'>Salut {name},<br>à toi de jouer.</h1><p class='question' style='margin:22px 0;padding:20px;border-left:4px solid #ffc83d;background:#f4f1e9;font-size:21px;font-weight:bold;line-height:1.45'>{body}</p><a class='cta' href='{html.escape(account_url, quote=True)}' style='display:inline-block;padding:15px 20px;border-radius:9px;background:#f05b42;color:#ffffff;text-decoration:none;font-size:17px;font-weight:bold'>Réponds à la question&nbsp;→</a></section>"
+        "</main></td></tr></table></body></html>"
+    )
+
+
+def daily_question_subject(participant: sqlite3.Row, question: sqlite3.Row) -> str:
+    """A readable, header-safe subject line containing the assigned question."""
+    body = re.sub(r"\s+", " ", str(question["rendered_body"])).strip()
+    return f"{participant['display_name']}, {body}"
+
+
 def deliver_email(recipient: str, subject: str, html_body: str) -> str:
     """Deliver one transactional email; simulation is reserved for automated tests."""
     mode = str(current_app.config["MAIL_MODE"]).lower()
@@ -2009,6 +2096,79 @@ def deliver_email(recipient: str, subject: str, html_body: str) -> str:
     except (OSError, smtplib.SMTPException) as exc:
         raise MailDeliveryError("Gmail a refusé ou interrompu l’envoi.") from exc
     return "gmail"
+
+
+def run_daily_question_mailer(*, now: datetime | None = None, enforce_noon: bool = True) -> dict[str, Any]:
+    """Create a new 48-hour cycle and send each reminder at most once.
+
+    This function is safe to call hourly: the cycle marker prevents a second
+    rotation and the delivery table prevents duplicate Gmail sends.
+    """
+    now = now or datetime.now(timezone.utc)
+    paris_now = now.astimezone(ZoneInfo("Europe/Paris"))
+    result: dict[str, Any] = {"sent": [], "failed": [], "skipped": [], "rotated": False}
+    if paris_now.weekday() == 6:
+        result["reason"] = "sunday"
+        return result
+    if enforce_noon and paris_now.hour != 12:
+        result["reason"] = "outside_noon"
+        return result
+
+    db = _db()
+    marker = db.execute("SELECT value FROM site_settings WHERE key='daily_question_cycle_at'").fetchone()
+    last_cycle = None
+    if marker and marker["value"]:
+        try:
+            last_cycle = datetime.fromisoformat(marker["value"])
+            if last_cycle.tzinfo is None:
+                last_cycle = last_cycle.replace(tzinfo=timezone.utc)
+        except ValueError:
+            last_cycle = None
+    due = last_cycle is None or now - last_cycle >= timedelta(hours=48)
+    people = completed_daily_participants()
+    if due:
+        for person in people:
+            db.execute("UPDATE daily_questions SET status='previous',updated_at=? WHERE participant_id=? AND status='active'",
+                       (utcnow(), person["id"]))
+            current_daily_question(person["id"], ignore_answer_cooldown=True)
+        db.execute(
+            """INSERT INTO site_settings(key,value,updated_at) VALUES ('daily_question_cycle_at',?,?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at""",
+            (now.isoformat(timespec="seconds"), utcnow()),
+        )
+        db.commit()
+        result["rotated"] = True
+
+    for person in people:
+        question = active_daily_question(person["id"])
+        if not question:
+            result["skipped"].append({"participant": person["display_name"], "reason": "no_question"})
+            continue
+        already_sent = db.execute(
+            "SELECT 1 FROM daily_question_mail_deliveries WHERE daily_question_id=?", (question["id"],)
+        ).fetchone()
+        if already_sent:
+            continue
+        recipient = str(person["email"] or "").strip().lower()
+        if not EMAIL_RE.fullmatch(recipient):
+            result["skipped"].append({"participant": person["display_name"], "reason": "missing_email"})
+            continue
+        subject = daily_question_subject(person, question)
+        snapshot = render_daily_question_email(person, question)
+        try:
+            mode = deliver_email(recipient, subject, snapshot)
+        except MailDeliveryError as exc:
+            result["failed"].append({"participant": person["display_name"], "error": str(exc)})
+            continue
+        db.execute(
+            """INSERT INTO daily_question_mail_deliveries
+               (daily_question_id,participant_id,recipient_email,subject,html_snapshot,delivery_mode,sent_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (question["id"], person["id"], recipient, subject, snapshot, mode, utcnow()),
+        )
+        db.commit()
+        result["sent"].append({"participant": person["display_name"], "recipientEmail": recipient, "deliveryMode": mode})
+    return result
 
 
 def choose_intro(revelation: sqlite3.Row) -> sqlite3.Row | None:
@@ -2204,14 +2364,17 @@ def register_account_api(app: Flask) -> None:
                     if answer_session["status"] == "completed" else None
                 ),
             }
-        daily = current_daily_question(participant["id"]) if answer_session and answer_session["status"] == "completed" else None
+        daily_enabled = bool(answer_session and answer_session["status"] == "completed")
+        daily = current_daily_question(participant["id"]) if daily_enabled else None
+        previous_daily = previous_daily_questions(participant["id"]) if daily_enabled else []
         return jsonify({
             "csrfToken": csrf_token(), "participant": participant_payload(participant),
             "questionnaire": questionnaire_payload,
             "answers": own_answers, "revelations": received, "rankingStats": ranking_stats, "rankings": ranking_stats,
             "repliesReceived": replies_received,
             "dailyQuestion": daily_question_payload(daily) if daily else None,
-            "dailyQuestionEnabled": bool(answer_session and answer_session["status"] == "completed"),
+            "previousDailyQuestions": [daily_question_payload(row) for row in previous_daily],
+            "dailyQuestionEnabled": daily_enabled,
         })
 
     @app.post("/api/account/question-suggestions")
@@ -2239,7 +2402,7 @@ def register_account_api(app: Flask) -> None:
         row = db.execute(
             """SELECT d.*,q.title,q.type,q.category,q.scale_min,q.scale_max,q.allow_self_target
                FROM daily_questions d JOIN questions q ON q.id=d.question_id
-               WHERE d.id=? AND d.participant_id=? AND d.status='active'""",
+               WHERE d.id=? AND d.participant_id=? AND d.status IN ('active','previous')""",
             (daily_id, g.current_participant["id"]),
         ).fetchone()
         if not row:
@@ -2377,6 +2540,30 @@ def register_admin_api(app: Flask) -> None:
             items.append({"participantId":person["id"],"participantName":person["display_name"],
                           "question":daily_question_payload(row) if row else None})
         return jsonify({"dailyQuestions":items})
+
+    @app.get("/api/admin/daily-question-mail-preview")
+    @admin_required
+    def admin_daily_question_mail_preview():
+        previews = []
+        for person in completed_daily_participants():
+            question = current_daily_question(person["id"])
+            if not question:
+                continue
+            recipient = str(person["email"] or "").strip().lower()
+            previews.append({
+                "participantId": person["id"], "participantName": person["display_name"],
+                "recipientEmail": recipient or None,
+                "subject": daily_question_subject(person, question),
+                "question": daily_question_payload(question),
+                "html": render_daily_question_email(person, question),
+            })
+        return jsonify({"previews": previews})
+
+    @app.post("/api/admin/daily-question-mails/send")
+    @admin_required
+    def admin_send_daily_question_mails():
+        """Send the current bonus-question batch immediately, once per question."""
+        return jsonify(run_daily_question_mailer(enforce_noon=False))
 
     @app.post("/api/admin/daily-questions/<int:participant_id>/regenerate")
     @admin_required

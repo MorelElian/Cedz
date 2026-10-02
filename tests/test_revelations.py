@@ -2,10 +2,11 @@ import base64
 import io
 import json
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 
-from app import DEFAULT_INTRO_PHRASES, MailDeliveryError, choose_intro, create_app, deliver_email
+from app import DEFAULT_INTRO_PHRASES, MailDeliveryError, choose_intro, create_app, deliver_email, run_daily_question_mailer
 
 
 @pytest.fixture()
@@ -231,6 +232,88 @@ def test_import_rebuilds_sessions_progress_and_fresh_database_emails(client, app
     assert len(questions["questions"]) == 12
     assert questions["remainingCount"] == 12
     assert questions["totalCount"] == 30
+
+
+def test_brand_link_opens_participant_account_when_logged_in(client):
+    csrf = admin_login(client)
+    participant = next(
+        person for person in client.get("/api/admin/participants").get_json()["participants"]
+        if person["displayName"] == "Barbs"
+    )
+    set_password(client, csrf, participant["id"])
+    participant_login(client, "Barbs")
+
+    page = client.get("/mon-compte")
+
+    assert b'<a class="brand" href="/mon-compte"' in page.data
+
+
+def test_daily_question_mail_cycle_keeps_previous_questions_and_never_duplicates(client, app, monkeypatch):
+    deliveries = []
+
+    def fake_delivery(recipient, subject, html_body):
+        deliveries.append((recipient, subject, html_body))
+        return "gmail_api"
+
+    monkeypatch.setattr("app.deliver_email", fake_delivery)
+    app.config.update(PUBLIC_BASE_URL="https://cedz.example", DAILY_SCHEDULER_TOKEN="job-secret")
+    csrf = admin_login(client)
+    people = client.get("/api/admin/participants").get_json()["participants"]
+    barbs = next(person for person in people if person["displayName"] == "Barbs")
+    assert client.patch(
+        f"/api/admin/participants/{barbs['id']}", json={"email": "barbs@example.fr"}, headers=csrf,
+    ).status_code == 200
+    set_password(client, csrf, barbs["id"])
+
+    wednesday_noon_paris = datetime(2026, 9, 23, 10, tzinfo=timezone.utc)
+    with app.test_request_context("/", base_url="https://cedz.example"):
+        first = run_daily_question_mailer(now=wednesday_noon_paris)
+        again = run_daily_question_mailer(now=wednesday_noon_paris)
+
+    assert first["rotated"] is True
+    assert any(item[0] == "barbs@example.fr" and item[1] != "Barbs - Question" for item in deliveries)
+    assert "Question bonus" in deliveries[0][2]
+    assert "Réponds à la question" in deliveries[0][2]
+    assert again["rotated"] is False
+    assert len(deliveries) == len(first["sent"])
+
+    with app.test_request_context("/", base_url="https://cedz.example"):
+        friday_noon_paris = datetime(2026, 9, 25, 10, tzinfo=timezone.utc)
+        second = run_daily_question_mailer(now=friday_noon_paris)
+        sunday = run_daily_question_mailer(now=datetime(2026, 9, 27, 10, tzinfo=timezone.utc))
+    assert second["rotated"] is True
+    assert sunday["reason"] == "sunday"
+
+    participant_login(client, "Barbs")
+    dashboard = client.get("/api/account/dashboard").get_json()
+    assert dashboard["dailyQuestion"]
+    assert dashboard["previousDailyQuestions"]
+    previous = dashboard["previousDailyQuestions"][0]
+    participant_csrf = {"X-CSRF-Token": dashboard["csrfToken"]}
+    if previous["type"] == "slider":
+        previous_answer = previous["scaleMin"]
+    elif previous["type"] in {"compare_two", "compare_three", "choose_one"}:
+        previous_answer = {"selectedParticipantId": previous["targets"][0]["id"], "comment": "Je rattrape mon retard."}
+    else:
+        previous_answer = "Je rattrape mon retard."
+    answer = client.post(
+        f"/api/account/daily-question/{previous['id']}/answer",
+        json={"answer": previous_answer}, headers=participant_csrf,
+    )
+    assert answer.status_code == 200
+
+    client.post("/logout")
+    assert client.get("/api/admin/daily-question-mail-preview").status_code == 401
+    csrf = admin_login(client)
+    previews = client.get("/api/admin/daily-question-mail-preview", headers=csrf).get_json()["previews"]
+    barbs_preview = next(item for item in previews if item["participantId"] == barbs["id"])
+    assert barbs_preview["subject"] == f"Barbs, {barbs_preview['question']['body']}"
+    assert "Question bonus" in barbs_preview["html"]
+    assert client.post("/api/jobs/daily-question-mails").status_code == 404
+    scheduled = client.post(
+        "/api/jobs/daily-question-mails", headers={"X-Cedz-Scheduler-Token": "job-secret"},
+    )
+    assert scheduled.status_code == 200
 
 
 def test_completed_participant_can_review_and_update_answers(client, app):

@@ -19,6 +19,7 @@
     <button type="button" aria-selected="false" data-tab="questions">Questions</button>
     <button type="button" aria-selected="false" data-tab="suggestions">Suggestions</button>
     <button type="button" aria-selected="false" data-tab="daily">Questions bonus</button>
+    <button type="button" aria-selected="false" data-tab="daily-mails">Mails bonus</button>
     <button type="button" aria-selected="false" data-tab="answers">Réponses</button>
     <button type="button" aria-selected="false" data-tab="revelations">Révélations</button>
     <button type="button" aria-selected="false" data-tab="sent">Historique envoyé</button>
@@ -50,6 +51,11 @@
   </section>
   <section class="admin-panel" data-panel="suggestions" hidden><div class="panel-toolbar"><div><h2>Suggestions à examiner</h2><p>Approuve-les pour les ajouter à la banque.</p></div></div><div class="answer-list" data-suggestion-list></div></section>
   <section class="admin-panel" data-panel="daily" hidden><div class="panel-toolbar"><div><h2>Questions bonus en cours</h2><p>Une question par participant. Regénère si besoin.</p></div><button class="button button-secondary button-small" type="button" data-reload-daily>Recharger</button></div><div class="answer-list" data-daily-list></div></section>
+  <section class="admin-panel" data-panel="daily-mails" hidden>
+    <div class="panel-toolbar"><div><p class="eyebrow">Aperçu avant envoi</p><h2>Mails « Question bonus »</h2><p>Voici le rendu exact qui partira au prochain cycle pour les participants ayant terminé leur questionnaire.</p></div><div class="toolbar-actions"><button class="button button-primary button-small" type="button" data-send-daily-mail-batch>Envoyer la volée</button><button class="button button-secondary button-small" type="button" data-reload-daily-mail-preview>Recharger</button></div></div>
+    <section class="bulk-send-summary" data-daily-mail-send-summary aria-live="polite" hidden></section>
+    <div class="daily-mail-preview-grid" data-daily-mail-preview><div class="admin-card loading-row">Ouvre cet onglet pour charger les aperçus.</div></div>
+  </section>
 
   <section class="admin-panel" data-panel="participants" hidden>
     <div class="panel-toolbar">
@@ -183,4 +189,4 @@
 </dialog>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily_mail.js') }}" defer></script>{% endblock %}
