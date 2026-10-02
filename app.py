@@ -963,7 +963,7 @@ def current_daily_question(
         return None
     people = db.execute("SELECT id,display_name FROM participants WHERE is_active=1 AND id!=? ORDER BY id", (participant_id,)).fetchall()
     candidates = db.execute(
-        "SELECT * FROM questions WHERE is_active=1 AND type IN ('free_text','compare_two','compare_three','slider')"
+        "SELECT * FROM questions WHERE is_active=1 AND type IN ('free_text','compare_two','compare_three','choose_one','slider')"
         + (" AND id=?" if question_id else "") + " ORDER BY id", ((question_id,) if question_id else ())
     ).fetchall()
     rng = secrets.SystemRandom()

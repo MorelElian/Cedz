@@ -316,6 +316,27 @@ def test_daily_question_mail_cycle_keeps_previous_questions_and_never_duplicates
     assert scheduled.status_code == 200
 
 
+
+def test_admin_can_prepare_choose_one_daily_question(client):
+    csrf = admin_login(client)
+    participants = client.get("/api/admin/participants").get_json()["participants"]
+    choose_one = client.post(
+        "/api/admin/questions",
+        json={
+            "title": "Le plus motivé", "body": "Qui va le plus s'entraîner ?",
+            "type": "choose_one", "targetMode": "all_people", "category": "Questions du jour",
+        }, headers=csrf,
+    )
+    assert choose_one.status_code == 201
+
+    response = client.post(
+        f"/api/admin/daily-questions/{participants[0]['id']}/regenerate",
+        json={"questionId": choose_one.get_json()["id"]}, headers=csrf,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["question"]["type"] == "choose_one"
+
 def test_completed_participant_can_review_and_update_answers(client, app):
     csrf = admin_login(client)
     participant = next(
