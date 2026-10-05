@@ -698,7 +698,13 @@ def revelation_recipient_ids(row: sqlite3.Row, answer: Any) -> list[int]:
         if row["target_participant_id"] and row["target_participant_id"] not in ids:
             ids.insert(0, row["target_participant_id"])
     valid = {item["id"] for item in _db().execute("SELECT id FROM participants WHERE is_active=1")}
-    return list(dict.fromkeys(int(value) for value in ids if value in valid and value != row["author_participant_id"]))
+    # A "choose one" bonus question deliberately offers all 10 participants,
+    # including its author. If they select themselves, it is still a valid
+    # revelation candidate for that selected person.
+    return list(dict.fromkeys(
+        int(value) for value in ids
+        if value in valid and (row["question_type"] == "choose_one" or value != row["author_participant_id"])
+    ))
 
 
 def revelation_content(row: sqlite3.Row, recipient_id: int, answer: Any) -> dict[str, Any]:
@@ -920,7 +926,7 @@ def daily_question_payload(row: sqlite3.Row) -> dict[str, Any]:
                if row[key] is not None]
     if row["type"] == "choose_one":
         targets = [participant_payload(person) for person in _db().execute(
-            "SELECT * FROM participants WHERE is_active=1 AND id!=? ORDER BY display_name", (row["participant_id"],)
+            "SELECT * FROM participants WHERE is_active=1 ORDER BY display_name"
         ).fetchall()]
     return {
         "id": row["id"], "questionId": row["question_id"], "title": row["title"],
@@ -931,7 +937,9 @@ def daily_question_payload(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def active_daily_question(participant_id: int) -> sqlite3.Row | None:
+def daily_question_with_status(participant_id: int, status: str) -> sqlite3.Row | None:
+    if status not in {"active", "pending"}:
+        raise ValueError("Invalid daily-question status")
     return _db().execute(
         """SELECT d.*,q.title,q.type,q.category,q.scale_min,q.scale_max,
                   p1.display_name target_participant_id_name,p2.display_name target_participant_2_id_name,
@@ -940,20 +948,33 @@ def active_daily_question(participant_id: int) -> sqlite3.Row | None:
            LEFT JOIN participants p1 ON p1.id=d.target_participant_id
            LEFT JOIN participants p2 ON p2.id=d.target_participant_2_id
            LEFT JOIN participants p3 ON p3.id=d.target_participant_3_id
-           WHERE d.participant_id=? AND d.status='active' ORDER BY d.id DESC LIMIT 1""", (participant_id,)
+           WHERE d.participant_id=? AND d.status=? ORDER BY d.id DESC LIMIT 1""", (participant_id, status)
     ).fetchone()
+
+
+def active_daily_question(participant_id: int) -> sqlite3.Row | None:
+    return daily_question_with_status(participant_id, "active")
+
+
+def pending_daily_question(participant_id: int) -> sqlite3.Row | None:
+    return daily_question_with_status(participant_id, "pending")
 
 
 def current_daily_question(
     participant_id: int, *, force: bool = False, question_id: int | None = None,
-    ignore_answer_cooldown: bool = False,
+    ignore_answer_cooldown: bool = False, created_status: str = "active",
 ) -> sqlite3.Row | None:
+    if created_status not in {"active", "pending"}:
+        raise ValueError("Invalid created daily-question status")
     db = _db()
     active = active_daily_question(participant_id)
     if active and not force:
         return active
-    if active:
+    if active and created_status == "active":
         db.execute("UPDATE daily_questions SET status='replaced',updated_at=? WHERE id=?", (utcnow(), active["id"]))
+    if created_status == "pending":
+        db.execute("UPDATE daily_questions SET status='replaced',updated_at=? WHERE participant_id=? AND status='pending'",
+                   (utcnow(), participant_id))
     latest = db.execute(
         "SELECT available_after FROM daily_questions WHERE participant_id=? AND status='answered' ORDER BY answered_at DESC LIMIT 1",
         (participant_id,),
@@ -986,17 +1007,17 @@ def current_daily_question(
         now = utcnow()
         cursor = db.execute(
             """INSERT INTO daily_questions(participant_id,question_id,target_participant_id,target_participant_2_id,target_participant_3_id,
-               rendered_body,status,assigned_at,updated_at) VALUES (?,?,?,?,?,?, 'active',?,?)""",
-            (participant_id, question["id"], *(ids + [None] * (3 - len(ids))), render_question(question["body"], ordered), now, now),
+               rendered_body,status,assigned_at,updated_at) VALUES (?,?,?,?,?,?, ?,?,?)""",
+            (participant_id, question["id"], *(ids + [None] * (3 - len(ids))), render_question(question["body"], ordered), created_status, now, now),
         )
         db.commit()
-        return current_daily_question(participant_id)
+        return daily_question_with_status(participant_id, created_status)
     db.commit()
     return None
 
 
 def previous_daily_questions(participant_id: int) -> list[sqlite3.Row]:
-    """Unanswered bonus questions that remain answerable after the next cycle."""
+    """Only unanswered bonus questions which were actually delivered by email."""
     return _db().execute(
         """SELECT d.*,q.title,q.type,q.category,q.scale_min,q.scale_max,
                   p1.display_name target_participant_id_name,p2.display_name target_participant_2_id_name,
@@ -1005,7 +1026,9 @@ def previous_daily_questions(participant_id: int) -> list[sqlite3.Row]:
            LEFT JOIN participants p1 ON p1.id=d.target_participant_id
            LEFT JOIN participants p2 ON p2.id=d.target_participant_2_id
            LEFT JOIN participants p3 ON p3.id=d.target_participant_3_id
-           WHERE d.participant_id=? AND d.status='previous' ORDER BY d.assigned_at DESC, d.id DESC""",
+           WHERE d.participant_id=? AND d.status='previous'
+             AND EXISTS (SELECT 1 FROM daily_question_mail_deliveries m WHERE m.daily_question_id=d.id)
+           ORDER BY d.assigned_at DESC, d.id DESC""",
         (participant_id,),
     ).fetchall()
 
@@ -2130,7 +2153,12 @@ def run_daily_question_mailer(*, now: datetime | None = None, enforce_noon: bool
         for person in people:
             db.execute("UPDATE daily_questions SET status='previous',updated_at=? WHERE participant_id=? AND status='active'",
                        (utcnow(), person["id"]))
-            current_daily_question(person["id"], ignore_answer_cooldown=True)
+            next_question = pending_daily_question(person["id"])
+            if next_question:
+                db.execute("UPDATE daily_questions SET status='active',updated_at=? WHERE id=?",
+                           (utcnow(), next_question["id"]))
+            else:
+                current_daily_question(person["id"], ignore_answer_cooldown=True)
         db.execute(
             """INSERT INTO site_settings(key,value,updated_at) VALUES ('daily_question_cycle_at',?,?)
                ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at""",
@@ -2365,7 +2393,8 @@ def register_account_api(app: Flask) -> None:
                 ),
             }
         daily_enabled = bool(answer_session and answer_session["status"] == "completed")
-        daily = current_daily_question(participant["id"]) if daily_enabled else None
+        # The participant only sees a question once its corresponding email was sent.
+        daily = active_daily_question(participant["id"]) if daily_enabled else None
         previous_daily = previous_daily_questions(participant["id"]) if daily_enabled else []
         return jsonify({
             "csrfToken": csrf_token(), "participant": participant_payload(participant),
@@ -2402,7 +2431,12 @@ def register_account_api(app: Flask) -> None:
         row = db.execute(
             """SELECT d.*,q.title,q.type,q.category,q.scale_min,q.scale_max,q.allow_self_target
                FROM daily_questions d JOIN questions q ON q.id=d.question_id
-               WHERE d.id=? AND d.participant_id=? AND d.status IN ('active','previous')""",
+               WHERE d.id=? AND d.participant_id=?
+                 AND (d.status='active' OR (
+                     d.status='previous' AND EXISTS (
+                         SELECT 1 FROM daily_question_mail_deliveries m WHERE m.daily_question_id=d.id
+                     )
+                 ))""",
             (daily_id, g.current_participant["id"]),
         ).fetchone()
         if not row:
@@ -2536,9 +2570,11 @@ def register_admin_api(app: Flask) -> None:
         people = _db().execute("SELECT id,display_name FROM participants WHERE is_active=1 ORDER BY display_name").fetchall()
         items=[]
         for person in people:
-            row=current_daily_question(person["id"])
+            current = active_daily_question(person["id"])
+            pending = pending_daily_question(person["id"])
             items.append({"participantId":person["id"],"participantName":person["display_name"],
-                          "question":daily_question_payload(row) if row else None})
+                          "question":daily_question_payload(current) if current else None,
+                          "nextQuestion":daily_question_payload(pending) if pending else None})
         return jsonify({"dailyQuestions":items})
 
     @app.get("/api/admin/daily-question-mail-preview")
@@ -2546,7 +2582,8 @@ def register_admin_api(app: Flask) -> None:
     def admin_daily_question_mail_preview():
         previews = []
         for person in completed_daily_participants():
-            question = current_daily_question(person["id"])
+            # A draft is previewable, but it is never shown as the participant's current question.
+            question = pending_daily_question(person["id"]) or active_daily_question(person["id"])
             if not question:
                 continue
             recipient = str(person["email"] or "").strip().lower()
@@ -2573,7 +2610,7 @@ def register_admin_api(app: Flask) -> None:
         data=json_body()
         try: question_id=int(data["questionId"]) if data.get("questionId") else None
         except (TypeError,ValueError): abort_json(400, "Question invalide.")
-        row=current_daily_question(participant_id,force=True,question_id=question_id)
+        row=current_daily_question(participant_id,force=True,question_id=question_id,created_status="pending")
         if not row: abort_json(409, "Aucune question compatible.")
         return jsonify({"question":daily_question_payload(row)})
 

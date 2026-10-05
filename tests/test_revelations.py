@@ -316,10 +316,86 @@ def test_daily_question_mail_cycle_keeps_previous_questions_and_never_duplicates
     assert scheduled.status_code == 200
 
 
+def test_unmailed_previous_daily_question_is_not_exposed(client, app, monkeypatch):
+    def reject_delivery(*_):
+        raise MailDeliveryError("refus simulé")
+
+    monkeypatch.setattr("app.deliver_email", reject_delivery)
+    csrf = admin_login(client)
+    barbs = next(
+        person for person in client.get("/api/admin/participants").get_json()["participants"]
+        if person["displayName"] == "Barbs"
+    )
+    assert client.patch(
+        f"/api/admin/participants/{barbs['id']}", json={"email": "barbs@example.fr"}, headers=csrf,
+    ).status_code == 200
+    set_password(client, csrf, barbs["id"])
+    with app.test_request_context("/", base_url="https://cedz.example"):
+        run_daily_question_mailer(now=datetime(2026, 9, 23, 10, tzinfo=timezone.utc))
+        run_daily_question_mailer(now=datetime(2026, 9, 25, 10, tzinfo=timezone.utc))
+
+    participant_login(client, "Barbs")
+    dashboard = client.get("/api/account/dashboard").get_json()
+    assert dashboard["previousDailyQuestions"] == []
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        previous_id = db.execute(
+            "SELECT id FROM daily_questions WHERE participant_id=? AND status='previous' ORDER BY id DESC LIMIT 1",
+            (barbs["id"],),
+        ).fetchone()[0]
+    blocked = client.post(
+        f"/api/account/daily-question/{previous_id}/answer", json={"answer": "pas visible"},
+        headers={"X-CSRF-Token": dashboard["csrfToken"]},
+    )
+    assert blocked.status_code == 404
+
+
+def test_daily_question_stays_tied_to_last_sent_mail_until_next_cycle(client, app, monkeypatch):
+    monkeypatch.setattr("app.deliver_email", lambda *_: "gmail_api")
+    csrf = admin_login(client)
+    barbs = next(
+        person for person in client.get("/api/admin/participants").get_json()["participants"]
+        if person["displayName"] == "Barbs"
+    )
+    assert client.patch(
+        f"/api/admin/participants/{barbs['id']}", json={"email": "barbs@example.fr"}, headers=csrf,
+    ).status_code == 200
+    set_password(client, csrf, barbs["id"])
+    with app.test_request_context("/", base_url="https://cedz.example"):
+        run_daily_question_mailer(now=datetime(2026, 9, 23, 10, tzinfo=timezone.utc))
+
+    participant_login(client, "Barbs")
+    dashboard = client.get("/api/account/dashboard").get_json()
+    sent_question = dashboard["dailyQuestion"]
+    answer = sent_question["scaleMin"] if sent_question["type"] == "slider" else "Réponse envoyée."
+    if sent_question["type"] in {"compare_two", "compare_three", "choose_one"}:
+        answer = {"selectedParticipantId": sent_question["targets"][0]["id"], "comment": "Réponse envoyée."}
+    assert client.post(
+        f"/api/account/daily-question/{sent_question['id']}/answer", json={"answer": answer},
+        headers={"X-CSRF-Token": dashboard["csrfToken"]},
+    ).status_code == 200
+    assert client.get("/api/account/dashboard").get_json()["dailyQuestion"] is None
+
+    client.post("/logout")
+    csrf = admin_login(client)
+    prepared = client.post(
+        f"/api/admin/daily-questions/{barbs['id']}/regenerate", json={}, headers=csrf,
+    )
+    assert prepared.status_code == 200
+    prepared_id = prepared.get_json()["question"]["id"]
+    client.post("/admin/logout", data={"csrf_token": csrf["X-CSRF-Token"]})
+    participant_login(client, "Barbs")
+    assert client.get("/api/account/dashboard").get_json()["dailyQuestion"] is None
+
+    with app.test_request_context("/", base_url="https://cedz.example"):
+        run_daily_question_mailer(now=datetime(2026, 9, 25, 10, tzinfo=timezone.utc))
+    dashboard_after = client.get("/api/account/dashboard").get_json()
+    assert dashboard_after["dailyQuestion"]["id"] == prepared_id
+
 
 def test_admin_can_prepare_choose_one_daily_question(client):
     csrf = admin_login(client)
     participants = client.get("/api/admin/participants").get_json()["participants"]
+    barbs = next(person for person in participants if person["displayName"] == "Barbs")
     choose_one = client.post(
         "/api/admin/questions",
         json={
@@ -330,12 +406,42 @@ def test_admin_can_prepare_choose_one_daily_question(client):
     assert choose_one.status_code == 201
 
     response = client.post(
-        f"/api/admin/daily-questions/{participants[0]['id']}/regenerate",
+        f"/api/admin/daily-questions/{barbs['id']}/regenerate",
         json={"questionId": choose_one.get_json()["id"]}, headers=csrf,
     )
 
     assert response.status_code == 200
-    assert response.get_json()["question"]["type"] == "choose_one"
+    question = response.get_json()["question"]
+    assert question["type"] == "choose_one"
+    assert {person["id"] for person in question["targets"]} == {person["id"] for person in participants}
+
+    # Promote the prepared question in this isolated test, as the real mail cycle does.
+    with sqlite3.connect(client.application.config["DATABASE"]) as db:
+        db.execute("UPDATE daily_questions SET status='active' WHERE id=?", (question["id"],))
+        db.commit()
+    set_password(client, csrf, barbs["id"])
+    participant_csrf = participant_login(client, "Barbs")
+    dashboard = client.get("/api/account/dashboard").get_json()
+    assert {person["id"] for person in dashboard["dailyQuestion"]["targets"]} == {
+        person["id"] for person in participants
+    }
+    answer = client.post(
+        f"/api/account/daily-question/{question['id']}/answer",
+        json={"answer": {"selectedParticipantId": barbs["id"], "comment": "Je me donne une chance."}},
+        headers=participant_csrf,
+    )
+    assert answer.status_code == 200
+    with sqlite3.connect(client.application.config["DATABASE"]) as db:
+        imported_id = db.execute(
+            "SELECT id FROM imported_answers WHERE source_key=?", (f"daily:{question['id']}",)
+        ).fetchone()[0]
+        recipients = {
+            row[0] for row in db.execute(
+                "SELECT recipient_participant_id FROM revelations WHERE imported_answer_id=?", (imported_id,)
+            )
+        }
+    assert recipients == {barbs["id"]}
+
 
 def test_completed_participant_can_review_and_update_answers(client, app):
     csrf = admin_login(client)
