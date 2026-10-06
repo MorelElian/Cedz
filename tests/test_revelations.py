@@ -432,9 +432,11 @@ def test_admin_can_prepare_choose_one_daily_question(client):
     )
     assert answer.status_code == 200
     with sqlite3.connect(client.application.config["DATABASE"]) as db:
-        imported_id = db.execute(
-            "SELECT id FROM imported_answers WHERE source_key=?", (f"daily:{question['id']}",)
-        ).fetchone()[0]
+        imported = db.execute(
+            "SELECT id,answer_json FROM imported_answers WHERE source_key=?", (f"daily:{question['id']}",)
+        ).fetchone()
+        imported_id = imported[0]
+        assert json.loads(imported[1])["comment"] == "Je me donne une chance."
         recipients = {
             row[0] for row in db.execute(
                 "SELECT recipient_participant_id FROM revelations WHERE imported_answer_id=?", (imported_id,)

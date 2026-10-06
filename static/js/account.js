@@ -94,7 +94,7 @@
     const type=pick(question,'type'),id=pick(question,'id'),body=pick(question,'body')||'Question';
     let input='';
     if(type==='slider') input='<input name="answer" type="range" min="'+esc(question.scaleMin??0)+'" max="'+esc(question.scaleMax??100)+'" value="'+esc(question.scaleMin??0)+'"><output>'+esc(question.scaleMin??0)+'</output>';
-    else if(type==='compare_two'||type==='compare_three'||type==='choose_one') input='<div class="daily-choices">'+(question.targets||[]).map(person=>'<label><input type="radio" name="answer" value="'+esc(person.id)+'" required>'+esc(person.displayName)+'</label>').join('')+'</div><textarea name="comment" placeholder="Un commentaire (facultatif)"></textarea>';
+    else if(type==='compare_two'||type==='compare_three'||type==='choose_one') input='<div class="daily-choices">'+(question.targets||[]).map(person=>'<label><input type="radio" name="answer" value="'+esc(person.id)+'" required>'+esc(person.displayName)+'</label>').join('')+'</div><label class="field daily-comment"><span>Un commentaire ? <small>(facultatif)</small></span><textarea name="comment" maxlength="1000" placeholder="Balance…"></textarea></label>';
     else input='<textarea name="answer" required maxlength="4000" placeholder="À toi de jouer…"></textarea>';
     root.innerHTML='<p>'+esc(body)+'</p><form data-daily-answer data-previous="'+(previous?'1':'0')+'" data-daily-id="'+esc(id)+'">'+input+'<button class="button button-primary" type="submit">Répondre</button><small class="form-note"></small></form>';
     const range=root.querySelector('input[type="range"]');if(range)range.addEventListener('input',()=>root.querySelector('output').textContent=range.value);
