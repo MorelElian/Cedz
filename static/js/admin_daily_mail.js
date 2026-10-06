@@ -30,9 +30,10 @@
       const response = await fetch('/api/admin/daily-question-mails/send', {method: 'POST', headers: {Accept: 'application/json', 'X-CSRF-Token': csrf}});
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'L’envoi a échoué.');
-      const sent = result.sent || [], failed = result.failed || [], skipped = result.skipped || [];
+      const sent = result.sent || [], failed = result.failed || [], skipped = result.skipped || [], alreadySent = result.alreadySent || [];
       const names = sent.map(item => item.participant).join(', ') || 'personne';
-      summary.innerHTML = `<strong>${sent.length} envoyé${sent.length > 1 ? 's' : ''}</strong> : ${esc(names)}.${failed.length ? ` <strong>${failed.length} échec${failed.length > 1 ? 's' : ''}</strong>.` : ''}${skipped.length ? ` ${skipped.length} ignoré${skipped.length > 1 ? 's' : ''} (adresse ou question manquante).` : ''}`;
+      const failedDetails = failed.map(item => `${item.participant} (${item.error || 'erreur inconnue'})`).join(', ');
+      summary.innerHTML = `<strong>${sent.length} envoyé${sent.length > 1 ? 's' : ''}</strong> : ${esc(names)}.${failed.length ? ` <strong>${failed.length} échec${failed.length > 1 ? 's' : ''}</strong> : ${esc(failedDetails)}.` : ''}${skipped.length ? ` ${skipped.length} ignoré${skipped.length > 1 ? 's' : ''} (adresse ou question manquante).` : ''}${alreadySent.length ? ` ${alreadySent.length} déjà envoyé${alreadySent.length > 1 ? 's' : ''}.` : ''}`;
       await load();
     } catch (error) { summary.textContent = error.message; }
     finally { sendButton.disabled = false; sendButton.textContent = 'Envoyer la volée'; }

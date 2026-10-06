@@ -1494,11 +1494,9 @@ def register_routes(app: Flask) -> None:
 
     @app.post("/api/jobs/daily-question-mails")
     def scheduled_daily_question_mails():
-        expected = str(current_app.config["DAILY_SCHEDULER_TOKEN"])
-        provided = request.headers.get("X-Cedz-Scheduler-Token", "")
-        if not expected or not secrets.compare_digest(provided, expected):
-            abort_json(404, "Introuvable.")
-        return jsonify(run_daily_question_mailer())
+        # Keep this endpoint inert in case an old Railway cron still calls it:
+        # bonus-question e-mails are now sent only from the admin portal.
+        abort_json(410, "L’envoi automatique des questions bonus est désactivé.")
 
     @app.route("/login", methods=["GET", "POST"])
     def participant_login():
@@ -2121,54 +2119,43 @@ def deliver_email(recipient: str, subject: str, html_body: str) -> str:
     return "gmail"
 
 
-def run_daily_question_mailer(*, now: datetime | None = None, enforce_noon: bool = True) -> dict[str, Any]:
-    """Create a new 48-hour cycle and send each reminder at most once.
-
-    This function is safe to call hourly: the cycle marker prevents a second
-    rotation and the delivery table prevents duplicate Gmail sends.
-    """
-    now = now or datetime.now(timezone.utc)
-    paris_now = now.astimezone(ZoneInfo("Europe/Paris"))
-    result: dict[str, Any] = {"sent": [], "failed": [], "skipped": [], "rotated": False}
-    if paris_now.weekday() == 6:
-        result["reason"] = "sunday"
-        return result
-    if enforce_noon and paris_now.hour != 12:
-        result["reason"] = "outside_noon"
-        return result
-
+def run_daily_question_mailer(*, promote_prepared: bool = False) -> dict[str, Any]:
+    """Send manually selected bonus questions, at most once each."""
+    result: dict[str, Any] = {
+        "sent": [], "failed": [], "skipped": [], "alreadySent": [], "rotated": False,
+    }
     db = _db()
-    marker = db.execute("SELECT value FROM site_settings WHERE key='daily_question_cycle_at'").fetchone()
-    last_cycle = None
-    if marker and marker["value"]:
-        try:
-            last_cycle = datetime.fromisoformat(marker["value"])
-            if last_cycle.tzinfo is None:
-                last_cycle = last_cycle.replace(tzinfo=timezone.utc)
-        except ValueError:
-            last_cycle = None
-    due = last_cycle is None or now - last_cycle >= timedelta(hours=48)
     people = completed_daily_participants()
-    if due:
+    if promote_prepared:
+        # Only promote questions deliberately prepared by the administrator.
+        # Clicking the send button never generates a surprise question.
+        promoted = False
         for person in people:
+            next_question = pending_daily_question(person["id"])
+            if not next_question:
+                continue
             db.execute("UPDATE daily_questions SET status='previous',updated_at=? WHERE participant_id=? AND status='active'",
                        (utcnow(), person["id"]))
-            next_question = pending_daily_question(person["id"])
-            if next_question:
-                db.execute("UPDATE daily_questions SET status='active',updated_at=? WHERE id=?",
-                           (utcnow(), next_question["id"]))
-            else:
-                current_daily_question(person["id"], ignore_answer_cooldown=True)
-        db.execute(
-            """INSERT INTO site_settings(key,value,updated_at) VALUES ('daily_question_cycle_at',?,?)
-               ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at""",
-            (now.isoformat(timespec="seconds"), utcnow()),
-        )
-        db.commit()
-        result["rotated"] = True
+            db.execute("UPDATE daily_questions SET status='active',updated_at=? WHERE id=?",
+                       (utcnow(), next_question["id"]))
+            promoted = True
+        if promoted:
+            db.commit()
+            result["rotated"] = True
 
     for person in people:
         question = active_daily_question(person["id"])
+        if not question:
+            # First manual batch only: create an initial question for someone
+            # who has never received one. Later questions must be prepared in
+            # the admin UI, then promoted by this same send action.
+            has_history = db.execute(
+                "SELECT 1 FROM daily_questions WHERE participant_id=? LIMIT 1", (person["id"],)
+            ).fetchone()
+            if not has_history:
+                question = current_daily_question(person["id"], ignore_answer_cooldown=True)
+                if question:
+                    db.commit()
         if not question:
             result["skipped"].append({"participant": person["display_name"], "reason": "no_question"})
             continue
@@ -2176,6 +2163,7 @@ def run_daily_question_mailer(*, now: datetime | None = None, enforce_noon: bool
             "SELECT 1 FROM daily_question_mail_deliveries WHERE daily_question_id=?", (question["id"],)
         ).fetchone()
         if already_sent:
+            result["alreadySent"].append({"participant": person["display_name"]})
             continue
         recipient = str(person["email"] or "").strip().lower()
         if not EMAIL_RE.fullmatch(recipient):
@@ -2600,7 +2588,8 @@ def register_admin_api(app: Flask) -> None:
     @admin_required
     def admin_send_daily_question_mails():
         """Send the current bonus-question batch immediately, once per question."""
-        return jsonify(run_daily_question_mailer(enforce_noon=False))
+        # The admin button is the only trigger for bonus-question e-mails.
+        return jsonify(run_daily_question_mailer(promote_prepared=True))
 
     @app.post("/api/admin/daily-questions/<int:participant_id>/regenerate")
     @admin_required

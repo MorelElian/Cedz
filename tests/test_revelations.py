@@ -265,24 +265,22 @@ def test_daily_question_mail_cycle_keeps_previous_questions_and_never_duplicates
     ).status_code == 200
     set_password(client, csrf, barbs["id"])
 
-    wednesday_noon_paris = datetime(2026, 9, 23, 10, tzinfo=timezone.utc)
     with app.test_request_context("/", base_url="https://cedz.example"):
-        first = run_daily_question_mailer(now=wednesday_noon_paris)
-        again = run_daily_question_mailer(now=wednesday_noon_paris)
+        first = run_daily_question_mailer()
+        again = run_daily_question_mailer()
 
-    assert first["rotated"] is True
+    assert first["rotated"] is False
     assert any(item[0] == "barbs@example.fr" and item[1] != "Barbs - Question" for item in deliveries)
     assert "Question bonus" in deliveries[0][2]
     assert "Réponds à la question" in deliveries[0][2]
     assert again["rotated"] is False
     assert len(deliveries) == len(first["sent"])
 
+    prepared = client.post(f"/api/admin/daily-questions/{barbs['id']}/regenerate", json={}, headers=csrf)
+    assert prepared.status_code == 200
     with app.test_request_context("/", base_url="https://cedz.example"):
-        friday_noon_paris = datetime(2026, 9, 25, 10, tzinfo=timezone.utc)
-        second = run_daily_question_mailer(now=friday_noon_paris)
-        sunday = run_daily_question_mailer(now=datetime(2026, 9, 27, 10, tzinfo=timezone.utc))
+        second = run_daily_question_mailer(promote_prepared=True)
     assert second["rotated"] is True
-    assert sunday["reason"] == "sunday"
 
     participant_login(client, "Barbs")
     dashboard = client.get("/api/account/dashboard").get_json()
@@ -309,11 +307,9 @@ def test_daily_question_mail_cycle_keeps_previous_questions_and_never_duplicates
     barbs_preview = next(item for item in previews if item["participantId"] == barbs["id"])
     assert barbs_preview["subject"] == f"Barbs, {barbs_preview['question']['body']}"
     assert "Question bonus" in barbs_preview["html"]
-    assert client.post("/api/jobs/daily-question-mails").status_code == 404
-    scheduled = client.post(
-        "/api/jobs/daily-question-mails", headers={"X-Cedz-Scheduler-Token": "job-secret"},
-    )
-    assert scheduled.status_code == 200
+    assert client.post("/api/jobs/daily-question-mails").status_code == 410
+    scheduled = client.post("/api/jobs/daily-question-mails", headers={"X-Cedz-Scheduler-Token": "job-secret"})
+    assert scheduled.status_code == 410
 
 
 def test_unmailed_previous_daily_question_is_not_exposed(client, app, monkeypatch):
@@ -331,8 +327,12 @@ def test_unmailed_previous_daily_question_is_not_exposed(client, app, monkeypatc
     ).status_code == 200
     set_password(client, csrf, barbs["id"])
     with app.test_request_context("/", base_url="https://cedz.example"):
-        run_daily_question_mailer(now=datetime(2026, 9, 23, 10, tzinfo=timezone.utc))
-        run_daily_question_mailer(now=datetime(2026, 9, 25, 10, tzinfo=timezone.utc))
+        run_daily_question_mailer()
+    assert client.post(
+        f"/api/admin/daily-questions/{barbs['id']}/regenerate", json={}, headers=csrf,
+    ).status_code == 200
+    with app.test_request_context("/", base_url="https://cedz.example"):
+        run_daily_question_mailer(promote_prepared=True)
 
     participant_login(client, "Barbs")
     dashboard = client.get("/api/account/dashboard").get_json()
@@ -361,7 +361,7 @@ def test_daily_question_stays_tied_to_last_sent_mail_until_next_cycle(client, ap
     ).status_code == 200
     set_password(client, csrf, barbs["id"])
     with app.test_request_context("/", base_url="https://cedz.example"):
-        run_daily_question_mailer(now=datetime(2026, 9, 23, 10, tzinfo=timezone.utc))
+        run_daily_question_mailer()
 
     participant_login(client, "Barbs")
     dashboard = client.get("/api/account/dashboard").get_json()
@@ -387,9 +387,36 @@ def test_daily_question_stays_tied_to_last_sent_mail_until_next_cycle(client, ap
     assert client.get("/api/account/dashboard").get_json()["dailyQuestion"] is None
 
     with app.test_request_context("/", base_url="https://cedz.example"):
-        run_daily_question_mailer(now=datetime(2026, 9, 25, 10, tzinfo=timezone.utc))
+        run_daily_question_mailer(promote_prepared=True)
     dashboard_after = client.get("/api/account/dashboard").get_json()
     assert dashboard_after["dailyQuestion"]["id"] == prepared_id
+
+
+def test_admin_mail_batch_promotes_prepared_questions_without_waiting_48_hours(client, app, monkeypatch):
+    deliveries = []
+    monkeypatch.setattr("app.deliver_email", lambda recipient, subject, body: deliveries.append((recipient, subject)) or "gmail_api")
+    csrf = admin_login(client)
+    barbs = next(person for person in client.get("/api/admin/participants").get_json()["participants"]
+                 if person["displayName"] == "Barbs")
+    assert client.patch(f"/api/admin/participants/{barbs['id']}", json={"email": "barbs@example.fr"}, headers=csrf).status_code == 200
+    set_password(client, csrf, barbs["id"])
+
+    with app.test_request_context("/", base_url="https://cedz.example"):
+        run_daily_question_mailer()
+    first_daily_id = client.application.config["DATABASE"]
+    prepared = client.post(f"/api/admin/daily-questions/{barbs['id']}/regenerate", json={}, headers=csrf)
+    assert prepared.status_code == 200
+    prepared_id = prepared.get_json()["question"]["id"]
+
+    response = client.post("/api/admin/daily-question-mails/send", headers=csrf)
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["rotated"] is True
+    assert any(item["participant"] == "Barbs" for item in payload["sent"])
+    assert len(deliveries) >= 2
+    with sqlite3.connect(first_daily_id) as db:
+        status = db.execute("SELECT status FROM daily_questions WHERE id=?", (prepared_id,)).fetchone()[0]
+    assert status == "active"
 
 
 def test_admin_can_prepare_choose_one_daily_question(client):

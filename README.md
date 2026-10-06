@@ -114,24 +114,13 @@ les mettre dans Git, un fichier `.env` commité ou une capture d'écran.
 Le téléphone participant est facultatif. Les réponses ne sont jamais exposées
 par les routes publiques ; seule une session admin permet de les lire/exporter.
 
-### Questions bonus automatiques
+### Questions bonus manuelles
 
-Les questions bonus sont renouvelées toutes les 48 heures à **12 h, heure de
-Paris**, sauf le dimanche. Chaque nouveau cycle garde les questions non
-répondues dans « Questions précédentes » sur l’espace participant. Le sujet de
-l’e-mail est la question attribuée au participant.
-
-Sur Railway, créer un second service **Cron Job**, depuis le même dépôt, avec :
-
-- commande : `python scripts/trigger_daily_question_mails.py` ;
-- planification : `0 * * * *` (une fois par heure) ;
-- les mêmes variables que le service web, au minimum
-  `T24_PUBLIC_BASE_URL` et `T24_DAILY_SCHEDULER_TOKEN`.
-
-Le déclencheur horaire est volontaire : l’application vérifie elle-même le
-fuseau `Europe/Paris`, l’heure de midi, les 48 h et le dimanche. Cela conserve
-l’heure de midi après les changements été/hiver et rend les relances sans
-danger : un e-mail déjà envoyé n’est jamais dupliqué.
+Les questions bonus sont entièrement pilotées depuis l’onglet admin des e-mails
+bonus. Prépare les questions voulues puis clique sur **Envoyer la volée** :
+elles deviennent les questions du moment et partent immédiatement. Aucun envoi,
+aucune rotation et aucun délai automatique ne sont appliqués. Une même question
+ne peut toutefois être envoyée qu’une fois à une personne.
 
 L’onglet **Administration → Mails bonus** montre le rendu exact des prochains
 e-mails, sans les envoyer.
