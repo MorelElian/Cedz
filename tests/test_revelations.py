@@ -472,6 +472,59 @@ def test_admin_can_prepare_choose_one_daily_question(client):
     assert recipients == {barbs["id"]}
 
 
+def test_daily_question_preparation_marks_a_question_already_generated_for_someone(client):
+    csrf = admin_login(client)
+    people = client.get("/api/admin/participants").get_json()["participants"]
+    barbs = next(person for person in people if person["displayName"] == "Barbs")
+    questions = client.get("/api/admin/questions", headers=csrf).get_json()["questions"]
+    question = next(question for question in questions if question["type"] == "free_text")
+
+    first = client.post(
+        f"/api/admin/daily-questions/{barbs['id']}/regenerate",
+        json={"questionId": question["id"]}, headers=csrf,
+    )
+    assert first.status_code == 200
+    assert first.get_json()["alreadyGenerated"] is False
+
+    repeated = client.post(
+        f"/api/admin/daily-questions/{barbs['id']}/regenerate",
+        json={"questionId": question["id"]}, headers=csrf,
+    )
+    assert repeated.status_code == 200
+    assert repeated.get_json()["alreadyGenerated"] is True
+    daily = client.get("/api/admin/daily-questions", headers=csrf).get_json()["dailyQuestions"]
+    barbs_daily = next(item for item in daily if item["participantId"] == barbs["id"])
+    assert barbs_daily["nextQuestion"]["alreadyGenerated"] is True
+
+
+def test_dashboard_adds_global_average_across_revealed_ranking_disciplines(client, app):
+    csrf = admin_login(client)
+    people = client.get("/api/admin/participants").get_json()["participants"]
+    barbs = next(person for person in people if person["displayName"] == "Barbs")
+    set_password(client, csrf, barbs["id"])
+
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        rows = db.execute(
+            "SELECT id,content_json FROM revelations WHERE recipient_participant_id=? AND question_type='ranking'",
+            (barbs["id"],),
+        ).fetchall()
+        by_discipline = {}
+        for row_id, content_json in rows:
+            content = json.loads(content_json)
+            by_discipline.setdefault(content["discipline"], (row_id, int(content["position"])))
+        assert {"nage", "vélo", "course"} <= set(by_discipline)
+        selected = [by_discipline[key] for key in ("nage", "vélo", "course")]
+        db.executemany("UPDATE revelations SET status='sent',sent_at='2026-10-08T12:00:00+00:00' WHERE id=?",
+                       [(row_id,) for row_id, _ in selected])
+        db.commit()
+
+    participant_login(client, "Barbs")
+    stats = client.get("/api/account/dashboard").get_json()["rankingStats"]
+    global_stat = next(item for item in stats if item["discipline"] == "global")
+    assert global_stat["revealedCount"] == 3
+    assert global_stat["averagePosition"] == round(sum(position for _, position in selected) / 3, 2)
+
+
 def test_completed_participant_can_review_and_update_answers(client, app):
     csrf = admin_login(client)
     participant = next(

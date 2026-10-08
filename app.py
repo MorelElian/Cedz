@@ -2339,6 +2339,13 @@ def register_account_api(app: Flask) -> None:
                 ranking_values.setdefault(content["discipline"], []).append(int(content["position"]))
         ranking_stats = [{"discipline": key, "averagePosition": round(sum(values) / len(values), 2), "revealedCount": len(values)}
                          for key, values in sorted(ranking_values.items())]
+        all_ranking_values = [position for values in ranking_values.values() for position in values]
+        if all_ranking_values:
+            ranking_stats.append({
+                "discipline": "global",
+                "averagePosition": round(sum(all_ranking_values) / len(all_ranking_values), 2),
+                "revealedCount": len(all_ranking_values),
+            })
         reply_rows = db.execute(
             """SELECT rr.message, rr.created_at, r.id revelation_id, p.display_name from_participant,
                       r.content_json, r.content_snapshot, r.final_content
@@ -2560,9 +2567,15 @@ def register_admin_api(app: Flask) -> None:
         for person in people:
             current = active_daily_question(person["id"])
             pending = pending_daily_question(person["id"])
+            next_question = daily_question_payload(pending) if pending else None
+            if next_question:
+                next_question["alreadyGenerated"] = _db().execute(
+                    "SELECT COUNT(*) FROM daily_questions WHERE participant_id=? AND question_id=?",
+                    (person["id"], pending["question_id"]),
+                ).fetchone()[0] > 1
             items.append({"participantId":person["id"],"participantName":person["display_name"],
                           "question":daily_question_payload(current) if current else None,
-                          "nextQuestion":daily_question_payload(pending) if pending else None})
+                          "nextQuestion":next_question})
         return jsonify({"dailyQuestions":items})
 
     @app.get("/api/admin/daily-question-mail-preview")
@@ -2599,9 +2612,20 @@ def register_admin_api(app: Flask) -> None:
         data=json_body()
         try: question_id=int(data["questionId"]) if data.get("questionId") else None
         except (TypeError,ValueError): abort_json(400, "Question invalide.")
+        previous_count = 0
+        if question_id:
+            previous_count = _db().execute(
+                "SELECT COUNT(*) FROM daily_questions WHERE participant_id=? AND question_id=?",
+                (participant_id, question_id),
+            ).fetchone()[0]
         row=current_daily_question(participant_id,force=True,question_id=question_id,created_status="pending")
         if not row: abort_json(409, "Aucune question compatible.")
-        return jsonify({"question":daily_question_payload(row)})
+        if not question_id:
+            previous_count = _db().execute(
+                "SELECT COUNT(*) FROM daily_questions WHERE participant_id=? AND question_id=?",
+                (participant_id, row["question_id"]),
+            ).fetchone()[0] - 1
+        return jsonify({"question":daily_question_payload(row), "alreadyGenerated": bool(previous_count)})
 
     @app.get("/api/admin/csrf")
     @admin_required

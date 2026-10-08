@@ -44,7 +44,7 @@
   }
 
   function renderRankings(rankings) {
-    const labels = {swim:['Nage','≈'], bike:['Vélo','↗'], run:['Course','→']};
+    const labels = {global:['Global','∑'], swim:['Nage','≈'], bike:['Vélo','↗'], run:['Course','→']};
     const aliases = {swimming:'swim', cycling:'bike', running:'run', nage:'swim', velo:'bike', 'vélo':'bike', course:'run'};
     const normalized = {};
     if (Array.isArray(rankings)) rankings.forEach(item => { normalized[aliases[String(item.discipline).toLowerCase()] || item.discipline] = item; });
