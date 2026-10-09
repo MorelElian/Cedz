@@ -477,7 +477,12 @@ def test_daily_question_preparation_marks_a_question_already_generated_for_someo
     people = client.get("/api/admin/participants").get_json()["participants"]
     barbs = next(person for person in people if person["displayName"] == "Barbs")
     questions = client.get("/api/admin/questions", headers=csrf).get_json()["questions"]
-    question = next(question for question in questions if question["type"] == "free_text")
+    created = client.post("/api/admin/questions", json={
+        "title": "Le plus régulier", "body": "Qui va le plus s'entraîner ?",
+        "type": "choose_one", "targetMode": "all_people", "category": "Questions du jour",
+    }, headers=csrf)
+    assert created.status_code == 201
+    question = created.get_json()
 
     first = client.post(
         f"/api/admin/daily-questions/{barbs['id']}/regenerate",
@@ -495,6 +500,21 @@ def test_daily_question_preparation_marks_a_question_already_generated_for_someo
     daily = client.get("/api/admin/daily-questions", headers=csrf).get_json()["dailyQuestions"]
     barbs_daily = next(item for item in daily if item["participantId"] == barbs["id"])
     assert barbs_daily["nextQuestion"]["alreadyGenerated"] is True
+
+    targeted_question = next(question for question in questions if question["type"] == "free_text")
+    with sqlite3.connect(client.application.config["DATABASE"]) as db:
+        db.execute(
+            """INSERT INTO daily_questions(participant_id,question_id,rendered_body,status,assigned_at,updated_at)
+               VALUES (?,?,?,'replaced','2026-10-08T12:00:00+00:00','2026-10-08T12:00:00+00:00')""",
+            (barbs["id"], targeted_question["id"], targeted_question["body"].replace("{person}", "Une autre personne")),
+        )
+        db.commit()
+    different_name = client.post(
+        f"/api/admin/daily-questions/{barbs['id']}/regenerate",
+        json={"questionId": targeted_question["id"]}, headers=csrf,
+    )
+    assert different_name.status_code == 200
+    assert different_name.get_json()["alreadyGenerated"] is False
 
 
 def test_dashboard_adds_global_average_across_revealed_ranking_disciplines(client, app):

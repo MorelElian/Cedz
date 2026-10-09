@@ -2570,8 +2570,8 @@ def register_admin_api(app: Flask) -> None:
             next_question = daily_question_payload(pending) if pending else None
             if next_question:
                 next_question["alreadyGenerated"] = _db().execute(
-                    "SELECT COUNT(*) FROM daily_questions WHERE participant_id=? AND question_id=?",
-                    (person["id"], pending["question_id"]),
+                    "SELECT COUNT(*) FROM daily_questions WHERE participant_id=? AND rendered_body=?",
+                    (person["id"], pending["rendered_body"]),
                 ).fetchone()[0] > 1
             items.append({"participantId":person["id"],"participantName":person["display_name"],
                           "question":daily_question_payload(current) if current else None,
@@ -2612,20 +2612,13 @@ def register_admin_api(app: Flask) -> None:
         data=json_body()
         try: question_id=int(data["questionId"]) if data.get("questionId") else None
         except (TypeError,ValueError): abort_json(400, "Question invalide.")
-        previous_count = 0
-        if question_id:
-            previous_count = _db().execute(
-                "SELECT COUNT(*) FROM daily_questions WHERE participant_id=? AND question_id=?",
-                (participant_id, question_id),
-            ).fetchone()[0]
         row=current_daily_question(participant_id,force=True,question_id=question_id,created_status="pending")
         if not row: abort_json(409, "Aucune question compatible.")
-        if not question_id:
-            previous_count = _db().execute(
-                "SELECT COUNT(*) FROM daily_questions WHERE participant_id=? AND question_id=?",
-                (participant_id, row["question_id"]),
-            ).fetchone()[0] - 1
-        return jsonify({"question":daily_question_payload(row), "alreadyGenerated": bool(previous_count)})
+        duplicate_count = _db().execute(
+            "SELECT COUNT(*) FROM daily_questions WHERE participant_id=? AND rendered_body=?",
+            (participant_id, row["rendered_body"]),
+        ).fetchone()[0]
+        return jsonify({"question":daily_question_payload(row), "alreadyGenerated": duplicate_count > 1})
 
     @app.get("/api/admin/csrf")
     @admin_required
