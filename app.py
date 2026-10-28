@@ -2569,19 +2569,20 @@ def register_account_api(app: Flask) -> None:
             cards.append(item)
         wall=[dict(id=w["id"],body=w["body"],createdAt=w["created_at"],author={"id":w["author_id"],"displayName":w["author_name"]}) for w in db.execute("SELECT w.*,p.id author_id,p.display_name author_name FROM profile_wall_posts w JOIN participants p ON p.id=w.author_participant_id WHERE w.profile_participant_id=? ORDER BY w.created_at DESC",(person_id,))]
         ranks=[]
+        discipline_keys = {"swim": "nage", "bike": "vélo", "run": "course"}
         for discipline in ("global","swim","bike","run"):
             rows=db.execute(revelation_query(" WHERE r.recipient_participant_id=? AND r.status='sent' AND r.question_type='ranking'"),(person_id,)).fetchall(); values=[]
             for row in rows:
                 data=json.loads(row["content_json"])
-                if discipline=="global" or data.get("discipline")==discipline: values.append(int(data.get("position",0)))
+                if discipline == "global" or data.get("discipline") == discipline_keys.get(discipline):
+                    values.append(int(data.get("position",0)))
             votes=[]
             for answer in db.execute("SELECT ia.*,p.display_name author_name FROM imported_answers ia JOIN participants p ON p.id=ia.author_participant_id WHERE ia.target_participant_id=? AND ia.question_type='ranking' AND ia.is_active=1",(person_id,)):
                 raw=json.loads(answer["answer_json"] or "{}")
                 ordered=raw.get("orderedParticipantIds",raw.get("ordered_participant_ids",[])) if isinstance(raw,dict) else []
                 if person_id in ordered: votes.append({"answerId":answer["id"],"author":answer["author_name"],"position":ordered.index(person_id)+1,"reactions":reactions("ranking_answer",answer["id"])})
             ranks.append({"discipline":discipline,"averagePosition":round(sum(values)/len(values),2) if values else None,"revealedCount":len(values),"votes":votes})
-        most=[dict(id=row["id"],question=json.loads(row["content_json"]).get("question",""),commentCount=row["comment_count"],recipient=row["recipient_name"]) for row in db.execute("SELECT r.id,r.content_json,p.display_name recipient_name,COUNT(c.id) comment_count FROM revelations r JOIN participants p ON p.id=r.recipient_participant_id LEFT JOIN social_comments c ON c.revelation_id=r.id WHERE r.status='sent' AND r.id IN (SELECT revelation_id FROM peloton_featured_revelations) GROUP BY r.id ORDER BY comment_count DESC,r.sent_at DESC LIMIT 3")]
-        return {"participant":participant_payload(person),"rankings":ranks,"featuredRevelations":cards,"wallPosts":wall,"mostCommented":most}
+        return {"participant":participant_payload(person),"rankings":ranks,"featuredRevelations":cards,"wallPosts":wall}
 
     @app.get("/api/peloton")
     @participant_required

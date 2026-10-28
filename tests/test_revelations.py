@@ -606,6 +606,10 @@ def test_dashboard_adds_global_average_across_revealed_ranking_disciplines(clien
     assert global_stat["revealedCount"] == 3
     assert global_stat["averagePosition"] == round(sum(position for _, position in selected) / 3, 2)
 
+    peloton = client.get(f"/api/peloton/{barbs['id']}").get_json()
+    peloton_counts = {item["discipline"]: item["revealedCount"] for item in peloton["rankings"]}
+    assert peloton_counts == {"global": 3, "swim": 1, "bike": 1, "run": 1}
+
 
 def test_completed_participant_can_review_and_update_answers(client, app):
     csrf = admin_login(client)
