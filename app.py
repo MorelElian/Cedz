@@ -6,6 +6,7 @@ import hashlib
 import html
 import io
 import json
+import math
 import os
 import re
 import secrets
@@ -471,6 +472,10 @@ def init_db() -> None:
         _db().execute("ALTER TABLE participants ADD COLUMN profile_photo_url TEXT")
     if "profile_tagline" not in participant_columns:
         _db().execute("ALTER TABLE participants ADD COLUMN profile_tagline TEXT")
+    if "height_cm" not in participant_columns:
+        _db().execute("ALTER TABLE participants ADD COLUMN height_cm INTEGER")
+    if "weight_kg" not in participant_columns:
+        _db().execute("ALTER TABLE participants ADD COLUMN weight_kg REAL")
     session_columns = {row["name"] for row in _db().execute("PRAGMA table_info(answer_sessions)")}
     if "feedback" not in session_columns:
         _db().execute("ALTER TABLE answer_sessions ADD COLUMN feedback TEXT")
@@ -1308,6 +1313,8 @@ def participant_payload(row: sqlite3.Row, private: bool = False) -> dict[str, An
         "isActive": bool(row["is_active"]),
         "requiresSecretCode": bool(row["secret_code"]),
         "profileTagline": row["profile_tagline"] if "profile_tagline" in row.keys() else None,
+        "heightCm": row["height_cm"] if "height_cm" in row.keys() else None,
+        "weightKg": row["weight_kg"] if "weight_kg" in row.keys() else None,
     }
     if private:
         result.update(email=row["email"], phone=row["phone"], secretCode=row["secret_code"],
@@ -2520,10 +2527,32 @@ def register_account_api(app: Flask) -> None:
     @app.patch("/api/account/profile")
     @participant_required
     def update_account_profile():
-        tagline = str(json_body().get("profileTagline", "")).strip()
+        data = json_body()
+        current = _db().execute("SELECT * FROM participants WHERE id=?", (g.current_participant["id"],)).fetchone()
+        tagline = str(data.get("profileTagline", current["profile_tagline"] or "")).strip()
         if len(tagline) > 120:
             abort_json(400, "La phrase d'accroche doit faire 120 caractères maximum.")
-        _db().execute("UPDATE participants SET profile_tagline=?,updated_at=? WHERE id=?", (tagline or None, utcnow(), g.current_participant["id"]))
+
+        def optional_measurement(key: str, minimum: float, maximum: float, integer: bool = False):
+            if key not in data:
+                return current["height_cm" if key == "heightCm" else "weight_kg"]
+            value = data[key]
+            if value in (None, ""):
+                return None
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                abort_json(400, "Valeur de profil invalide.")
+            if not math.isfinite(number) or not minimum <= number <= maximum or (integer and not number.is_integer()):
+                abort_json(400, "Valeur de profil invalide.")
+            return int(number) if integer else round(number, 1)
+
+        height = optional_measurement("heightCm", 100, 250, integer=True)
+        weight = optional_measurement("weightKg", 30, 250)
+        _db().execute(
+            "UPDATE participants SET profile_tagline=?,height_cm=?,weight_kg=?,updated_at=? WHERE id=?",
+            (tagline or None, height, weight, utcnow(), g.current_participant["id"]),
+        )
         _db().commit()
         return jsonify(participant_payload(_db().execute("SELECT * FROM participants WHERE id=?", (g.current_participant["id"],)).fetchone(), private=True))
 

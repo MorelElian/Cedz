@@ -176,7 +176,12 @@
       const name = pick(participant, 'displayName', 'display_name', 'name') || 'toi';
       app.querySelector('[data-account-name]').textContent = name;
       app.querySelector('[data-account-avatar]').innerHTML = avatarMarkup(participant);
-      const taglineField=app.querySelector('[data-tagline-form]')?.elements.profileTagline;if(taglineField)taglineField.value=pick(participant,'profileTagline','profile_tagline')||'';
+      const profileForm=app.querySelector('[data-tagline-form]');
+      if(profileForm){
+        profileForm.elements.profileTagline.value=pick(participant,'profileTagline','profile_tagline')||'';
+        profileForm.elements.heightCm.value=pick(participant,'heightCm','height_cm')||'';
+        profileForm.elements.weightKg.value=pick(participant,'weightKg','weight_kg')||'';
+      }
       const revelations = list(payload, 'revelations'); revelationItems = revelations;
       const authorSelect = app.querySelector('[data-revelation-author]');
       authorSelect.innerHTML = '<option value="">Tout le monde</option>' + [...new Set(revelations.map(item => pick(item, 'authorName', 'author_name')).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'fr')).map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('');
@@ -224,7 +229,7 @@
     catch (error) { status.textContent = error.message; }
     finally { button.disabled = false; }
   });
-  app.querySelector('[data-tagline-form]').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,status=form.querySelector('[data-tagline-status]'),button=form.querySelector('button');button.disabled=true;try{await api('/api/account/profile',{method:'PATCH',body:JSON.stringify({profileTagline:new FormData(form).get('profileTagline')})});status.textContent='Accroche enregistrée.';}catch(error){status.textContent=error.message;}finally{button.disabled=false;}});
+  app.querySelector('[data-tagline-form]').addEventListener('submit',async event=>{event.preventDefault();const form=event.currentTarget,status=form.querySelector('[data-tagline-status]'),button=form.querySelector('button');button.disabled=true;try{await api('/api/account/profile',{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(form)))});status.textContent='Fiche enregistrée.';}catch(error){status.textContent=error.message;}finally{button.disabled=false;}});
   const suggestionDialog=app.querySelector('[data-suggestion-dialog]'), suggestionForm=app.querySelector('[data-suggestion-form]');
   app.querySelector('[data-open-suggestion]').addEventListener('click',()=>suggestionDialog.showModal());
   suggestionForm.elements.type.addEventListener('change',event=>{const markers={free_text:'{person}',slider:'{person}',compare_two:'{person1} et {person2}',compare_three:'{person1}, {person2} et {person3}',choose_one:''};suggestionForm.querySelector('[data-suggestion-help]').textContent=markers[event.target.value]?'Utilise '+markers[event.target.value]+' dans ta question.':'Pas de placeholder : la personne choisie sera proposée dans la réponse.';});

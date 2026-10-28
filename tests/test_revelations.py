@@ -698,6 +698,27 @@ def test_login_hashes_password_and_isolates_questionnaires(client, app):
     assert client.get(f"/questionnaire/{session_id}").status_code == 403
 
 
+def test_participant_can_complete_public_peloton_profile(client):
+    csrf = admin_login(client)
+    participant = client.get("/api/admin/participants").get_json()["participants"][0]
+    set_password(client, csrf, participant["id"])
+    account_csrf = participant_login(client, participant["displayName"])
+
+    response = client.patch(
+        "/api/account/profile",
+        json={"profileTagline": "On se retrouve au ravito.", "heightCm": 181, "weightKg": 72.5},
+        headers=account_csrf,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["profileTagline"] == "On se retrouve au ravito."
+    assert response.get_json()["heightCm"] == 181
+    assert response.get_json()["weightKg"] == 72.5
+    public_profile = client.get(f"/api/peloton/{participant['id']}").get_json()["participant"]
+    assert public_profile["heightCm"] == 181
+    assert public_profile["weightKg"] == 72.5
+
+
 def test_login_rejects_external_next_redirect(client):
     csrf = admin_login(client)
     rov = next(person for person in client.get("/api/admin/participants").get_json()["participants"]
