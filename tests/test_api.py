@@ -115,6 +115,8 @@ def test_participant_account_leaves_pwa_install_prompt_to_chrome(client):
     authenticate_as(client, participant["id"])
     page = client.get("/compte")
     assert b'data-install-pwa' not in page.data
+    assert b'Activer les notifications' in page.data
+    assert b'Ne rate plus aucune r' in page.data
     assert b'beforeinstallprompt' not in client.get("/static/js/account.js").data
 
 
