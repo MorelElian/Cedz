@@ -35,12 +35,12 @@
       <div class="discipline-grid" data-rankings></div>
     </section>
 
-    <section class="account-section" aria-labelledby="history-title" data-account-view="revelations">
+    <section class="account-section" aria-labelledby="history-title" data-account-view="dossiers">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Les dossiers sortis</p><h2 id="history-title">Ce qu'ils pensent de moi</h2></div><div class="revelation-filters"><label><span>Trier</span><select data-revelation-sort><option value="recent">Plus récentes</option><option value="oldest">Plus anciennes</option></select></label><label><span>Par</span><select data-revelation-author><option value="">Tout le monde</option></select></label><label><span>Type</span><select data-revelation-type><option value="">Tout</option><option value="ranking">Classements</option><option value="other">Autres révélations</option></select></label></div></div>
       <div class="revelation-history" data-revelation-history></div>
     </section>
 
-    <section class="account-section" aria-labelledby="answers-title" data-account-view="answers">
+    <section class="account-section" aria-labelledby="answers-title" data-account-view="dossiers">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Tes propres casseroles</p><h2 id="answers-title">Mes réponses</h2></div></div>
       <div class="answer-accordions" data-my-answers></div>
     </section>
@@ -48,6 +48,11 @@
     <section class="account-section" aria-labelledby="received-replies-title" data-account-view="profile">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Retour à l'envoyeur</p><h2 id="received-replies-title">Réponses reçues</h2></div></div>
       <div class="received-replies" data-replies-received></div>
+    </section>
+    <details class="password-panel" data-account-view="profile"><summary>Ma phrase d'accroche</summary><form class="stack-form" data-tagline-form><label class="field"><span>Visible sur ta fiche Peloton</span><input name="profileTagline" maxlength="120" placeholder="Ex. Le vélo est une religion."></label><button class="button button-primary" type="submit">Enregistrer</button><p class="form-note" data-tagline-status></p></form></details>
+    <section class="account-section peloton-section" data-account-view="peloton" data-peloton-app>
+      <div class="section-heading"><div><p class="eyebrow">Le vestiaire</p><h2>Peloton</h2></div></div>
+      <div class="peloton-layout"><nav class="peloton-rail" aria-label="Choisir un participant" data-peloton-rail></nav><div class="peloton-fiche" data-peloton-fiche><div class="loading-row">Chargement du peloton…</div></div></div>
     </section>
 
     <details class="password-panel" data-account-view="profile">
@@ -60,10 +65,10 @@
       </form>
     </details>
     <nav class="participant-tabbar" aria-label="Navigation de l’espace participant">
-      <a href="#home" data-account-tab="home">Accueil</a><a href="#revelations" data-account-tab="revelations">Révélations</a><a href="#answers" data-account-tab="answers">Mes réponses</a><a href="#profile" data-account-tab="profile">Profil</a>
+      <a href="#home" data-account-tab="home">Accueil</a><a href="#dossiers" data-account-tab="dossiers">Dossiers</a><a href="#peloton" data-account-tab="peloton">Peloton</a><a href="#profile" data-account-tab="profile">Profil</a>
     </nav>
   </div>
   <div class="error-state" data-account-error hidden><span aria-hidden="true">⚠</span><h2>Le casier est coincé.</h2><p>Recharge la page dans un instant.</p></div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='js/account.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/account.js') }}" defer></script><script src="{{ url_for('static', filename='js/peloton.js') }}" defer></script>{% endblock %}

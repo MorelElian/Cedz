@@ -383,6 +383,10 @@ def init_db() -> None:
             participant_id INTEGER NOT NULL REFERENCES participants(id), endpoint TEXT NOT NULL UNIQUE,
             subscription_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS profile_wall_posts (id INTEGER PRIMARY KEY AUTOINCREMENT,profile_participant_id INTEGER NOT NULL REFERENCES participants(id),author_participant_id INTEGER NOT NULL REFERENCES participants(id),body TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS social_comments (id INTEGER PRIMARY KEY AUTOINCREMENT,revelation_id INTEGER NOT NULL REFERENCES revelations(id),author_participant_id INTEGER NOT NULL REFERENCES participants(id),body TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS social_reactions (id INTEGER PRIMARY KEY AUTOINCREMENT,target_type TEXT NOT NULL,target_id INTEGER NOT NULL,author_participant_id INTEGER NOT NULL REFERENCES participants(id),kind TEXT NOT NULL,custom_label TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(target_type,target_id,author_participant_id));
+        CREATE TABLE IF NOT EXISTS peloton_featured_revelations (profile_participant_id INTEGER NOT NULL REFERENCES participants(id),revelation_id INTEGER NOT NULL REFERENCES revelations(id),position INTEGER NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(profile_participant_id,position),UNIQUE(profile_participant_id,revelation_id));
         CREATE TABLE IF NOT EXISTS site_settings (
             key TEXT PRIMARY KEY,
             value TEXT,
@@ -465,6 +469,8 @@ def init_db() -> None:
     participant_columns = {row["name"] for row in _db().execute("PRAGMA table_info(participants)")}
     if "profile_photo_url" not in participant_columns:
         _db().execute("ALTER TABLE participants ADD COLUMN profile_photo_url TEXT")
+    if "profile_tagline" not in participant_columns:
+        _db().execute("ALTER TABLE participants ADD COLUMN profile_tagline TEXT")
     session_columns = {row["name"] for row in _db().execute("PRAGMA table_info(answer_sessions)")}
     if "feedback" not in session_columns:
         _db().execute("ALTER TABLE answer_sessions ADD COLUMN feedback TEXT")
@@ -1301,6 +1307,7 @@ def participant_payload(row: sqlite3.Row, private: bool = False) -> dict[str, An
         "profilePhotoUrl": profile_photo,
         "isActive": bool(row["is_active"]),
         "requiresSecretCode": bool(row["secret_code"]),
+        "profileTagline": row["profile_tagline"] if "profile_tagline" in row.keys() else None,
     }
     if private:
         result.update(email=row["email"], phone=row["phone"], secretCode=row["secret_code"],
@@ -2510,6 +2517,106 @@ def register_account_api(app: Flask) -> None:
         _db().commit()
         return jsonify({"subscribed": False})
 
+    @app.patch("/api/account/profile")
+    @participant_required
+    def update_account_profile():
+        tagline = str(json_body().get("profileTagline", "")).strip()
+        if len(tagline) > 120:
+            abort_json(400, "La phrase d'accroche doit faire 120 caractères maximum.")
+        _db().execute("UPDATE participants SET profile_tagline=?,updated_at=? WHERE id=?", (tagline or None, utcnow(), g.current_participant["id"]))
+        _db().commit()
+        return jsonify(participant_payload(_db().execute("SELECT * FROM participants WHERE id=?", (g.current_participant["id"],)).fetchone(), private=True))
+
+    def peloton_person(person_id: int) -> dict[str, Any]:
+        db = _db(); person = db.execute("SELECT * FROM participants WHERE id=? AND is_active=1", (person_id,)).fetchone()
+        if not person: abort_json(404, "Participant introuvable.")
+        featured = db.execute(revelation_query(" WHERE r.recipient_participant_id=? AND r.status='sent' AND r.id IN (SELECT revelation_id FROM peloton_featured_revelations WHERE profile_participant_id=?) ORDER BY (SELECT position FROM peloton_featured_revelations WHERE revelation_id=r.id AND profile_participant_id=?)"), (person_id, person_id, person_id)).fetchall()
+        def reactions(target_type: str, target_id: int):
+            return [dict(id=row["id"], kind=row["kind"], customLabel=row["custom_label"], author={"id":row["author_id"],"displayName":row["author_name"]}) for row in db.execute("SELECT sr.*,p.id author_id,p.display_name author_name FROM social_reactions sr JOIN participants p ON p.id=sr.author_participant_id WHERE target_type=? AND target_id=? ORDER BY sr.created_at", (target_type,target_id))]
+        cards=[]
+        for row in featured:
+            item=revelation_payload(row); item["reactions"]=reactions("revelation",row["id"])
+            item["comments"]=[dict(id=c["id"],body=c["body"],createdAt=c["created_at"],author={"id":c["author_id"],"displayName":c["author_name"]}) for c in db.execute("SELECT c.*,p.id author_id,p.display_name author_name FROM social_comments c JOIN participants p ON p.id=c.author_participant_id WHERE c.revelation_id=? ORDER BY c.created_at DESC",(row["id"],))]
+            cards.append(item)
+        wall=[dict(id=w["id"],body=w["body"],createdAt=w["created_at"],author={"id":w["author_id"],"displayName":w["author_name"]}) for w in db.execute("SELECT w.*,p.id author_id,p.display_name author_name FROM profile_wall_posts w JOIN participants p ON p.id=w.author_participant_id WHERE w.profile_participant_id=? ORDER BY w.created_at DESC",(person_id,))]
+        ranks=[]
+        for discipline in ("global","swim","bike","run"):
+            rows=db.execute(revelation_query(" WHERE r.recipient_participant_id=? AND r.status='sent' AND r.question_type='ranking'"),(person_id,)).fetchall(); values=[]
+            for row in rows:
+                data=json.loads(row["content_json"])
+                if discipline=="global" or data.get("discipline")==discipline: values.append(int(data.get("position",0)))
+            votes=[]
+            for answer in db.execute("SELECT ia.*,p.display_name author_name FROM imported_answers ia JOIN participants p ON p.id=ia.author_participant_id WHERE ia.target_participant_id=? AND ia.question_type='ranking' AND ia.is_active=1",(person_id,)):
+                raw=json.loads(answer["answer_json"] or "{}")
+                ordered=raw.get("orderedParticipantIds",raw.get("ordered_participant_ids",[])) if isinstance(raw,dict) else []
+                if person_id in ordered: votes.append({"answerId":answer["id"],"author":answer["author_name"],"position":ordered.index(person_id)+1,"reactions":reactions("ranking_answer",answer["id"])})
+            ranks.append({"discipline":discipline,"averagePosition":round(sum(values)/len(values),2) if values else None,"revealedCount":len(values),"votes":votes})
+        most=[dict(id=row["id"],question=json.loads(row["content_json"]).get("question",""),commentCount=row["comment_count"],recipient=row["recipient_name"]) for row in db.execute("SELECT r.id,r.content_json,p.display_name recipient_name,COUNT(c.id) comment_count FROM revelations r JOIN participants p ON p.id=r.recipient_participant_id LEFT JOIN social_comments c ON c.revelation_id=r.id WHERE r.status='sent' AND r.id IN (SELECT revelation_id FROM peloton_featured_revelations) GROUP BY r.id ORDER BY comment_count DESC,r.sent_at DESC LIMIT 3")]
+        return {"participant":participant_payload(person),"rankings":ranks,"featuredRevelations":cards,"wallPosts":wall,"mostCommented":most}
+
+    @app.get("/api/peloton")
+    @participant_required
+    def peloton_list():
+        return jsonify({"participants":[participant_payload(row) for row in _db().execute("SELECT * FROM participants WHERE is_active=1 ORDER BY display_name")]})
+
+    @app.get("/api/peloton/<int:participant_id>")
+    @participant_required
+    def peloton_profile(participant_id: int): return jsonify(peloton_person(participant_id))
+
+    @app.post("/api/peloton/<int:participant_id>/wall-posts")
+    @participant_required
+    def peloton_wall_post(participant_id: int):
+        body=str(json_body().get("body","")).strip()
+        if not body or len(body)>800: abort_json(400,"Message invalide.")
+        if not _db().execute("SELECT 1 FROM participants WHERE id=? AND is_active=1",(participant_id,)).fetchone(): abort_json(404,"Participant introuvable.")
+        now=utcnow(); _db().execute("INSERT INTO profile_wall_posts(profile_participant_id,author_participant_id,body,created_at,updated_at) VALUES (?,?,?,?,?)",(participant_id,g.current_participant["id"],body,now,now)); _db().commit(); return jsonify(peloton_person(participant_id)),201
+
+    @app.post("/api/peloton/revelations/<int:revelation_id>/comments")
+    @participant_required
+    def peloton_comment(revelation_id: int):
+        body=str(json_body().get("body","")).strip(); row=_db().execute("SELECT recipient_participant_id FROM revelations WHERE id=? AND status='sent'",(revelation_id,)).fetchone()
+        if not row or not _db().execute("SELECT 1 FROM peloton_featured_revelations WHERE revelation_id=?",(revelation_id,)).fetchone(): abort_json(404,"Révélation introuvable.")
+        if not body or len(body)>800: abort_json(400,"Commentaire invalide.")
+        now=utcnow();_db().execute("INSERT INTO social_comments(revelation_id,author_participant_id,body,created_at,updated_at) VALUES(?,?,?,?,?)",(revelation_id,g.current_participant["id"],body,now,now));_db().commit();return jsonify(peloton_person(row["recipient_participant_id"])),201
+
+    @app.put("/api/peloton/reactions")
+    @participant_required
+    def peloton_react():
+        data=json_body(); target_type=str(data.get("targetType","")).strip(); target_id=data.get("targetId"); kind=str(data.get("kind","")).strip(); label=str(data.get("customLabel","")).strip()
+        if target_type not in {"revelation","ranking_answer"} or not isinstance(target_id,int) or kind not in {"agree","disagree","custom"} or (kind=="custom" and (not label or len(label)>40)): abort_json(400,"Réaction invalide.")
+        if target_type=="revelation":
+            row=_db().execute("SELECT recipient_participant_id FROM revelations WHERE id=? AND status='sent'",(target_id,)).fetchone()
+            if not row or not _db().execute("SELECT 1 FROM peloton_featured_revelations WHERE revelation_id=?",(target_id,)).fetchone(): abort_json(404,"Révélation introuvable.")
+            profile_id=row["recipient_participant_id"]
+        else:
+            row=_db().execute("SELECT target_participant_id FROM imported_answers WHERE id=? AND question_type='ranking' AND is_active=1",(target_id,)).fetchone()
+            if not row or not row["target_participant_id"]: abort_json(404,"Vote introuvable.")
+            profile_id=row["target_participant_id"]
+        now=utcnow();_db().execute("INSERT INTO social_reactions(target_type,target_id,author_participant_id,kind,custom_label,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(target_type,target_id,author_participant_id) DO UPDATE SET kind=excluded.kind,custom_label=excluded.custom_label,updated_at=excluded.updated_at",(target_type,target_id,g.current_participant["id"],kind,label if kind=="custom" else None,now,now));_db().commit();return jsonify(peloton_person(profile_id))
+
+    @app.delete("/api/peloton/wall-posts/<int:post_id>")
+    @participant_required
+    def delete_peloton_wall(post_id: int):
+        row=_db().execute("SELECT profile_participant_id,author_participant_id FROM profile_wall_posts WHERE id=?",(post_id,)).fetchone()
+        if not row: abort_json(404,"Message introuvable.")
+        if row["author_participant_id"]!=g.current_participant["id"]: abort_json(403,"Tu ne peux supprimer que tes messages.")
+        _db().execute("DELETE FROM profile_wall_posts WHERE id=?",(post_id,));_db().commit();return jsonify(peloton_person(row["profile_participant_id"]))
+
+    @app.delete("/api/peloton/comments/<int:comment_id>")
+    @participant_required
+    def delete_peloton_comment(comment_id: int):
+        row=_db().execute("SELECT c.author_participant_id,r.recipient_participant_id FROM social_comments c JOIN revelations r ON r.id=c.revelation_id WHERE c.id=?",(comment_id,)).fetchone()
+        if not row: abort_json(404,"Commentaire introuvable.")
+        if row["author_participant_id"]!=g.current_participant["id"]: abort_json(403,"Tu ne peux supprimer que tes commentaires.")
+        _db().execute("DELETE FROM social_comments WHERE id=?",(comment_id,));_db().commit();return jsonify(peloton_person(row["recipient_participant_id"]))
+
+    @app.delete("/api/peloton/reactions/<int:revelation_id>")
+    @participant_required
+    def delete_peloton_reaction(revelation_id: int):
+        row=_db().execute("SELECT recipient_participant_id FROM revelations WHERE id=? AND status='sent'",(revelation_id,)).fetchone()
+        if not row: abort_json(404,"Révélation introuvable.")
+        _db().execute("DELETE FROM social_reactions WHERE target_type='revelation' AND target_id=? AND author_participant_id=?",(revelation_id,g.current_participant["id"]));_db().commit();return jsonify(peloton_person(row["recipient_participant_id"]))
+
     @app.post("/api/account/question-suggestions")
     @participant_required
     def create_question_suggestion():
@@ -2635,6 +2742,50 @@ def register_account_api(app: Flask) -> None:
 
 
 def register_admin_api(app: Flask) -> None:
+    @app.get("/api/admin/peloton/<int:participant_id>")
+    @admin_required
+    def admin_peloton_profile(participant_id: int):
+        person = _db().execute("SELECT id,display_name FROM participants WHERE id=?", (participant_id,)).fetchone()
+        if not person: abort_json(404, "Participant introuvable.")
+        rows = _db().execute(revelation_query(" WHERE r.recipient_participant_id=? AND r.status='sent' ORDER BY r.sent_at DESC"), (participant_id,)).fetchall()
+        chosen = [row["revelation_id"] for row in _db().execute("SELECT revelation_id FROM peloton_featured_revelations WHERE profile_participant_id=? ORDER BY position", (participant_id,))]
+        return jsonify({"participantId": participant_id, "featuredRevelationIds": chosen, "revelations": [{"id":row["id"],"question":json.loads(row["content_json"]).get("question",""),"content":row["final_content"],"sentAt":row["sent_at"]} for row in rows]})
+
+    @app.put("/api/admin/peloton/<int:participant_id>/featured-revelations")
+    @admin_required
+    def admin_peloton_featured(participant_id: int):
+        raw = json_body().get("revelationIds", [])
+        if not isinstance(raw, list) or len(raw)>5:
+            abort_json(400, "Choisis entre zéro et cinq révélations.")
+        try: ids=[int(value) for value in raw]
+        except (TypeError,ValueError): abort_json(400,"Liste invalide.")
+        if len(set(ids))!=len(ids): abort_json(400,"Une révélation ne peut apparaître qu'une fois.")
+        if not _db().execute("SELECT 1 FROM participants WHERE id=?",(participant_id,)).fetchone(): abort_json(404,"Participant introuvable.")
+        if ids:
+            placeholders=','.join('?' for _ in ids); valid=_db().execute(f"SELECT id FROM revelations WHERE recipient_participant_id=? AND status='sent' AND id IN ({placeholders})",[participant_id,*ids]).fetchall()
+            if {row['id'] for row in valid}!=set(ids): abort_json(400,"Sélection de révélations invalide.")
+        db=_db();db.execute("DELETE FROM peloton_featured_revelations WHERE profile_participant_id=?",(participant_id,));now=utcnow()
+        for position,revelation_id in enumerate(ids,1): db.execute("INSERT INTO peloton_featured_revelations(profile_participant_id,revelation_id,position,created_at) VALUES(?,?,?,?)",(participant_id,revelation_id,position,now))
+        db.commit();return jsonify({"featuredRevelationIds":ids})
+
+    @app.get("/api/admin/peloton/social")
+    @admin_required
+    def admin_peloton_social():
+        db=_db()
+        wall=[{"id":r["id"],"type":"wall","body":r["body"],"author":r["author"],"profile":r["profile"]} for r in db.execute("SELECT w.id,w.body,a.display_name author,p.display_name profile FROM profile_wall_posts w JOIN participants a ON a.id=w.author_participant_id JOIN participants p ON p.id=w.profile_participant_id ORDER BY w.created_at DESC")]
+        comments=[{"id":r["id"],"type":"comment","body":r["body"],"author":r["author"],"profile":r["profile"]} for r in db.execute("SELECT c.id,c.body,a.display_name author,p.display_name profile FROM social_comments c JOIN participants a ON a.id=c.author_participant_id JOIN revelations rv ON rv.id=c.revelation_id JOIN participants p ON p.id=rv.recipient_participant_id ORDER BY c.created_at DESC")]
+        reactions=[{"id":r["id"],"type":"reaction","body":r["kind"] if not r["custom_label"] else r["custom_label"],"author":r["author"],"profile":""} for r in db.execute("SELECT sr.id,sr.kind,sr.custom_label,p.display_name author FROM social_reactions sr JOIN participants p ON p.id=sr.author_participant_id ORDER BY sr.created_at DESC")]
+        return jsonify({"items":wall+comments+reactions})
+
+    @app.delete("/api/admin/peloton/social/<string:kind>/<int:item_id>")
+    @admin_required
+    def admin_delete_peloton_social(kind: str,item_id: int):
+        tables={"wall":"profile_wall_posts","comment":"social_comments","reaction":"social_reactions"}
+        if kind not in tables: abort_json(404,"Contenu introuvable.")
+        cursor=_db().execute(f"DELETE FROM {tables[kind]} WHERE id=?",(item_id,));_db().commit()
+        if not cursor.rowcount: abort_json(404,"Contenu introuvable.")
+        return jsonify({"deleted":True})
+
     @app.get("/api/admin/push-subscriptions")
     @admin_required
     def admin_push_subscriptions():

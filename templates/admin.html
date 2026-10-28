@@ -26,6 +26,7 @@
     <button type="button" aria-selected="false" data-tab="phrases">Phrases d'intro</button>
     <button type="button" aria-selected="false" data-tab="feedback">Messages</button>
     <button type="button" aria-selected="false" data-tab="push">Notifications</button>
+    <button type="button" aria-selected="false" data-tab="peloton">Peloton</button>
   </nav>
 
   <div class="admin-live" role="status" aria-live="polite" data-admin-status></div>
@@ -65,6 +66,7 @@
     </div>
     <div class="admin-card" data-admin-push-result hidden></div>
   </section>
+  <section class="admin-panel" data-panel="peloton" hidden><div class="admin-card stack-form" data-admin-peloton><h2>Fiches Peloton</h2><label class="field"><span>Participant</span><select data-peloton-person><option>Chargement…</option></select></label><p>Choisis et ordonne au maximum cinq révélations envoyées.</p><div data-peloton-revelations></div><button class="button button-primary" type="button" data-save-peloton>Sauvegarder la fiche</button><p class="form-note" data-peloton-admin-status></p></div><div class="admin-card"><h2>Modération</h2><div data-peloton-social>Chargement…</div></div></section>
   <section class="admin-panel" data-panel="suggestions" hidden><div class="panel-toolbar"><div><h2>Suggestions à examiner</h2><p>Approuve-les pour les ajouter à la banque.</p></div></div><div class="answer-list" data-suggestion-list></div></section>
   <section class="admin-panel" data-panel="daily" hidden><div class="panel-toolbar"><div><h2>Questions bonus en cours</h2><p>Une question par participant. Regénère si besoin.</p></div><button class="button button-secondary button-small" type="button" data-reload-daily>Recharger</button></div><div class="answer-list" data-daily-list></div></section>
   <section class="admin-panel" data-panel="daily-mails" hidden>
@@ -205,4 +207,4 @@
 </dialog>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily_mail.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_push.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily_mail.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_push.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_peloton.js') }}" defer></script>{% endblock %}
