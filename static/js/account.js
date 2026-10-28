@@ -9,6 +9,35 @@
   const list = (payload, key) => Array.isArray(payload) ? payload : payload?.[key] || payload?.data?.[key] || [];
   let revelationItems = [];
 
+  function vapidKeyToBytes(value) {
+    const padding = '='.repeat((4 - value.length % 4) % 4);
+    const decoded = atob((value + padding).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(decoded, char => char.charCodeAt(0));
+  }
+
+  function configurePush(publicKey) {
+    const prompt = app.querySelector('[data-push-prompt]');
+    const button = app.querySelector('[data-enable-push]');
+    const status = app.querySelector('[data-push-status]');
+    if (!prompt || !button || !publicKey || !('Notification' in window) || !('PushManager' in window) || Notification.permission !== 'default') return;
+    prompt.hidden = false;
+    button.onclick = async () => {
+      button.disabled = true;
+      status.textContent = 'Activation…';
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') throw new Error('Tu peux les activer plus tard dans les réglages du navigateur.');
+        const subscription = await registration.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: vapidKeyToBytes(publicKey)});
+        await api('/api/account/push-subscriptions', {method: 'POST', body: JSON.stringify(subscription.toJSON())});
+        prompt.hidden = true;
+      } catch (error) {
+        status.textContent = error.message || 'Impossible d’activer les notifications.';
+        button.disabled = false;
+      }
+    };
+  }
+
   function applyTab() {
     const tab = (location.hash || '#home').slice(1);
     const active = ['home', 'revelations', 'answers', 'profile'].includes(tab) ? tab : 'home';
@@ -158,6 +187,7 @@
       renderAnswers(list(payload, 'answers'), participantNames);
       renderReplies(payload.repliesReceived || payload.replies_received || []);
       if(payload.dailyQuestionEnabled) renderDaily(payload.dailyQuestion, payload.previousDailyQuestions || payload.previous_daily_questions || []);
+      configurePush(payload.pushPublicKey);
       const questionnaire = payload.questionnaire || {};
       const link = app.querySelector('[data-questionnaire-link]');
       const questionnaireUrl = pick(payload, 'questionnaireUrl', 'questionnaire_url') || pick(questionnaire, 'url', 'questionnaireUrl', 'questionnaire_url');

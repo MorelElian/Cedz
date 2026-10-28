@@ -381,6 +381,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .reply-card h2 { font-size: 2rem; }
 .reply-card > blockquote { margin: 1rem 0 0; padding: 1rem; border-left: 5px solid var(--mint); background: rgba(26,169,145,.08); }
 .account-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .6rem; }
+.push-prompt { display:flex; align-items:center; gap:1rem; margin:1rem 0 0; padding:1rem 1.15rem; border:1px solid rgba(18,26,50,.14); border-radius:18px; background:#fff; box-shadow:0 10px 28px rgba(18,26,50,.08); }
+.push-prompt p { margin:.2rem 0 0; color:var(--muted); }
+.push-prompt .button { margin-left:auto; white-space:nowrap; }
+.push-prompt small { color:var(--danger); }
 .daily-question-card { padding: 1.2rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); box-shadow: var(--shadow); }
 .daily-question-card > p { margin-bottom: 1rem; font-family: Georgia,serif; font-size: 1.2rem; }
 .daily-question-card form { display: grid; gap: .75rem; }
@@ -491,6 +495,7 @@ tbody tr:last-child td { border-bottom: 0; }
   .account-avatar { width: 72px; margin: 0 auto; border-width: 3px; font-size: 1.35rem; }
   .account-hero h1 { font-size: clamp(2rem,10vw,3rem); }
   .account-actions { display: grid; grid-template-columns: repeat(auto-fit,minmax(135px,1fr)); width: 100%; }.account-actions .button { width: 100%; }
+  .push-prompt { align-items:flex-start; flex-wrap:wrap; text-align:left; }.push-prompt .button { margin-left:auto; }
   .section-heading.compact-heading { align-items: flex-start; flex-direction: column; }.revelation-filters { width: 100%; justify-content: stretch; }.revelation-filters label { flex: 1; }.revelation-filters select { width: 100%; }
   .discipline-grid, .intro-phrase-columns, .decision-actions { grid-template-columns: 1fr; }
   .discipline-card { min-height: 150px; }

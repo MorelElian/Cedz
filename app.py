@@ -24,6 +24,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from pywebpush import WebPushException, webpush
+
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from flask import (
@@ -222,6 +224,9 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         ),
         PUBLIC_BASE_URL=os.environ.get("T24_PUBLIC_BASE_URL", "").strip().rstrip("/"),
         DAILY_SCHEDULER_TOKEN=os.environ.get("T24_DAILY_SCHEDULER_TOKEN", ""),
+        VAPID_PUBLIC_KEY=os.environ.get("T24_VAPID_PUBLIC_KEY", ""),
+        VAPID_PRIVATE_KEY=os.environ.get("T24_VAPID_PRIVATE_KEY", ""),
+        VAPID_SUBJECT=os.environ.get("T24_VAPID_SUBJECT", "mailto:cedzt24@gmail.com"),
         SMTP_TIMEOUT=20,
         MAX_CONTENT_LENGTH=6_000_000,
         SESSION_COOKIE_HTTPONLY=True,
@@ -373,6 +378,11 @@ def init_db() -> None:
             sent_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_daily_mail_deliveries_participant ON daily_question_mail_deliveries(participant_id);
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            participant_id INTEGER NOT NULL REFERENCES participants(id), endpoint TEXT NOT NULL UNIQUE,
+            subscription_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS site_settings (
             key TEXT PRIMARY KEY,
             value TEXT,
@@ -2198,6 +2208,14 @@ def run_daily_question_mailer(*, promote_prepared: bool = False) -> dict[str, An
             (question["id"], person["id"], recipient, subject, snapshot, mode, utcnow()),
         )
         db.commit()
+        public_base = str(current_app.config.get("PUBLIC_BASE_URL", "")).rstrip("/")
+        account_path = url_for("account_page")
+        send_push_notification(
+            person["id"],
+            title=subject,
+            body="Une question bonus t’attend.",
+            url=public_base + account_path if public_base else url_for("account_page", _external=True),
+        )
         result["sent"].append({"participant": person["display_name"], "recipientEmail": recipient, "deliveryMode": mode})
     return result
 
@@ -2252,6 +2270,28 @@ def revelation_query(where: str = "") -> str:
               JOIN participants author ON author.id = r.author_participant_id""" + where
 
 
+def send_push_notification(participant_id: int, *, title: str, body: str, url: str) -> None:
+    if not current_app.config["VAPID_PUBLIC_KEY"] or not current_app.config["VAPID_PRIVATE_KEY"]:
+        return
+    db = _db()
+    for row in db.execute("SELECT id,endpoint,subscription_json FROM push_subscriptions WHERE participant_id=?", (participant_id,)).fetchall():
+        try:
+            webpush(json.loads(row["subscription_json"]), data=json.dumps({"title": title, "body": body, "url": url}),
+                    vapid_private_key=current_app.config["VAPID_PRIVATE_KEY"],
+                    vapid_claims={"sub": current_app.config["VAPID_SUBJECT"]}, ttl=3600)
+        except WebPushException as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in {404, 410}:
+                db.execute("DELETE FROM push_subscriptions WHERE id=?", (row["id"],))
+            else:
+                current_app.logger.warning("Push delivery failed for participant %s", participant_id)
+        except Exception:
+            # Notifications are an extra convenience: a malformed or expired
+            # browser subscription must never prevent an email/revelation send.
+            current_app.logger.warning("Unexpected push delivery failure for participant %s", participant_id)
+    db.commit()
+
+
 def deliver_revelation(row: sqlite3.Row) -> dict[str, Any]:
     """Send and persist one validated in-review revelation in the current transaction."""
     db = _db()
@@ -2273,6 +2313,14 @@ def deliver_revelation(row: sqlite3.Row) -> dict[str, Any]:
             (row["recipient_participant_id"], row["intro_phrase_id"], now),
         )
     db.commit()
+    public_base = str(current_app.config.get("PUBLIC_BASE_URL", "")).rstrip("/")
+    detail_path = url_for("revelation_detail_page", revelation_id=row["id"])
+    send_push_notification(
+        row["recipient_participant_id"],
+        title="Une révélation t’attend.",
+        body="Ouvre Cedz pour la découvrir.",
+        url=public_base + detail_path if public_base else url_for("revelation_detail_page", revelation_id=row["id"], _external=True),
+    )
     sent = db.execute(revelation_query(" WHERE r.id=?"), (row["id"],)).fetchone()
     payload = revelation_payload(sent, admin=True)
     payload["deliveryMode"] = delivery_mode
@@ -2423,7 +2471,38 @@ def register_account_api(app: Flask) -> None:
             "dailyQuestionEnabled": daily_enabled,
             "answeredDailyQuestion": answered_daily,
             "unansweredPreviousDailyCount": len(previous_daily),
+            "pushPublicKey": current_app.config["VAPID_PUBLIC_KEY"] or None,
         })
+
+    @app.post("/api/account/push-subscriptions")
+    @participant_required
+    def save_push_subscription():
+        subscription = json_body()
+        endpoint = str(subscription.get("endpoint", ""))
+        keys = subscription.get("keys")
+        if not endpoint.startswith("https://") or not isinstance(keys, dict) or not keys.get("p256dh") or not keys.get("auth"):
+            abort_json(400, "Abonnement de notification invalide.")
+        now = utcnow()
+        _db().execute("""INSERT INTO push_subscriptions(participant_id,endpoint,subscription_json,created_at,updated_at)
+                       VALUES (?,?,?,?,?) ON CONFLICT(endpoint) DO UPDATE SET participant_id=excluded.participant_id,
+                       subscription_json=excluded.subscription_json,updated_at=excluded.updated_at""",
+                      (g.current_participant["id"], endpoint, json.dumps(subscription), now, now))
+        _db().commit()
+        return jsonify({"subscribed": True})
+
+    @app.delete("/api/account/push-subscriptions")
+    @participant_required
+    def remove_push_subscription():
+        data = json_body()
+        endpoint = str(data.get("endpoint", ""))
+        if not endpoint:
+            abort_json(400, "Abonnement de notification invalide.")
+        _db().execute(
+            "DELETE FROM push_subscriptions WHERE participant_id=? AND endpoint=?",
+            (g.current_participant["id"], endpoint),
+        )
+        _db().commit()
+        return jsonify({"subscribed": False})
 
     @app.post("/api/account/question-suggestions")
     @participant_required

@@ -1,7 +1,7 @@
 {
   "name": "Cedz Are Shooting",
   "short_name": "Cedz",
-  "start_url": "/account#home",
+  "start_url": "/compte#home",
   "display": "standalone",
   "background_color": "#f4f1e9",
   "theme_color": "#111a35",

@@ -173,6 +173,9 @@ augmente nettement.
    - `T24_GMAIL_REFRESH_TOKEN` avec le refresh token OAuth
    - `T24_MAIL_FROM=Cedz Are Shooting <cedzt24@gmail.com>`
    - `T24_PUBLIC_BASE_URL=https://cedz-production.up.railway.app`
+   - `T24_VAPID_PUBLIC_KEY` avec la clé publique générée par `web-push`
+   - `T24_VAPID_PRIVATE_KEY` avec la clé privée correspondante — elle doit rester secrète
+   - `T24_VAPID_SUBJECT=mailto:cedzt24@gmail.com`
 5. Dans **Settings → Deploy**, définir le healthcheck sur `/health`.
 6. Dans **Settings → Networking**, cliquer sur **Generate Domain**.
 

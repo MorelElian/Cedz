@@ -250,12 +250,14 @@ def test_brand_link_opens_participant_account_when_logged_in(client):
 
 def test_daily_question_mail_cycle_keeps_previous_questions_and_never_duplicates(client, app, monkeypatch):
     deliveries = []
+    pushes = []
 
     def fake_delivery(recipient, subject, html_body):
         deliveries.append((recipient, subject, html_body))
         return "gmail_api"
 
     monkeypatch.setattr("app.deliver_email", fake_delivery)
+    monkeypatch.setattr("app.send_push_notification", lambda participant_id, **payload: pushes.append((participant_id, payload)))
     app.config.update(PUBLIC_BASE_URL="https://cedz.example", DAILY_SCHEDULER_TOKEN="job-secret")
     csrf = admin_login(client)
     people = client.get("/api/admin/participants").get_json()["participants"]
@@ -273,6 +275,7 @@ def test_daily_question_mail_cycle_keeps_previous_questions_and_never_duplicates
     assert any(item[0] == "barbs@example.fr" and item[1] != "Barbs - Question" for item in deliveries)
     assert "Question bonus" in deliveries[0][2]
     assert "Réponds à la question" in deliveries[0][2]
+    assert any(participant_id == barbs["id"] and payload["title"].startswith("Barbs, ") for participant_id, payload in pushes)
     assert again["rotated"] is False
     assert len(deliveries) == len(first["sent"])
 

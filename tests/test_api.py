@@ -71,7 +71,7 @@ def test_pwa_manifest_and_service_worker_are_public_static_only(client):
     manifest = client.get("/manifest.webmanifest")
     assert manifest.status_code == 200
     assert manifest.mimetype == "application/manifest+json"
-    assert manifest.get_json()["start_url"] == "/account#home"
+    assert manifest.get_json()["start_url"] == "/compte#home"
     worker = client.get("/sw.js")
     assert worker.status_code == 200
     assert worker.mimetype == "application/javascript"
@@ -79,6 +79,23 @@ def test_pwa_manifest_and_service_worker_are_public_static_only(client):
     body = worker.get_data(as_text=True)
     assert "/api/" not in body
     assert "cache.addAll" in body
+    assert "notificationclick" in body
+
+
+def test_participant_can_save_own_push_subscription(client, app):
+    participant = client.get("/api/participants").get_json()["participants"][0]
+    authenticate_as(client, participant["id"])
+    dashboard = client.get("/api/account/dashboard").get_json()
+    response = client.post(
+        "/api/account/push-subscriptions",
+        json={"endpoint": "https://push.example.test/subscription", "keys": {"p256dh": "public", "auth": "secret"}},
+        headers={"X-CSRF-Token": dashboard["csrfToken"]},
+    )
+    assert response.status_code == 200
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        row = db.execute("SELECT participant_id,subscription_json FROM push_subscriptions").fetchone()
+    assert row[0] == participant["id"]
+    assert '"endpoint": "https://push.example.test/subscription"' in row[1]
 
 
 def valid_answer(question, participant_ids):
