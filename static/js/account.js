@@ -3,7 +3,6 @@
   if (!app) return;
 
   const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js', {scope: '/'}).catch(() => {});
   const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
   const pick = (object, ...keys) => keys.map(key => object?.[key]).find(value => value !== undefined && value !== null);
   const list = (payload, key) => Array.isArray(payload) ? payload : payload?.[key] || payload?.data?.[key] || [];

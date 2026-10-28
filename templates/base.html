@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#111a35">
   <meta name="description" content="Cedz Are Shooting — le questionnaire du T24.">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  {% if session.get('participant_id') %}<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon-192.png') }}">{% endif %}
+  {% if not request.path.startswith('/admin') %}<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon-192.png') }}">{% endif %}
   <title>{% block title %}Cedz Are Shooting{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/background.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
@@ -41,6 +41,7 @@
       <a href="/admin">Espace admin</a>
     </footer>
   </div>
+  {% if not request.path.startswith('/admin') %}<script src="{{ url_for('static', filename='js/pwa-bootstrap.js') }}" defer></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

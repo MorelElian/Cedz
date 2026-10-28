@@ -116,6 +116,13 @@ def test_participant_account_includes_pwa_install_control(client):
     assert b'data-install-pwa' in page.data
 
 
+def test_public_participant_pages_expose_pwa_but_admin_does_not(client):
+    login = client.get("/login")
+    assert b'rel="manifest" href="/manifest.webmanifest"' in login.data
+    assert b'/static/js/pwa-bootstrap.js' in login.data
+    assert b'rel="manifest" href="/manifest.webmanifest"' not in client.get("/admin/login").data
+
+
 def valid_answer(question, participant_ids):
     question_type = question["type"]
     if question_type in {"free_text", "single_person_answer"}:
