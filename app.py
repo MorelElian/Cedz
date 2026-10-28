@@ -1480,6 +1480,21 @@ def register_routes(app: Flask) -> None:
     def favicon():
         return app.send_static_file("favicon.svg")
 
+    @app.get("/manifest.webmanifest")
+    def pwa_manifest():
+        return send_from_directory(app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json", max_age=0)
+
+    @app.get("/sw.js")
+    def service_worker():
+        response = send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript", max_age=0)
+        response.headers["Service-Worker-Allowed"] = "/"
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    @app.get("/offline")
+    def offline_page():
+        return send_from_directory(app.static_folder, "offline.html", max_age=0)
+
     @app.get("/logo.png")
     def project_logo():
         return send_from_directory(Path(__file__).parent, "logo.png", max_age=86400)

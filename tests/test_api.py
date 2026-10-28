@@ -67,6 +67,20 @@ def assert_cycle_sample(rows, expected_participant_ids):
         assert degrees == Counter({participant_id: 2 for participant_id in expected_participant_ids})
 
 
+def test_pwa_manifest_and_service_worker_are_public_static_only(client):
+    manifest = client.get("/manifest.webmanifest")
+    assert manifest.status_code == 200
+    assert manifest.mimetype == "application/manifest+json"
+    assert manifest.get_json()["start_url"] == "/account#home"
+    worker = client.get("/sw.js")
+    assert worker.status_code == 200
+    assert worker.mimetype == "application/javascript"
+    assert worker.headers["Service-Worker-Allowed"] == "/"
+    body = worker.get_data(as_text=True)
+    assert "/api/" not in body
+    assert "cache.addAll" in body
+
+
 def valid_answer(question, participant_ids):
     question_type = question["type"]
     if question_type in {"free_text", "single_person_answer"}:
