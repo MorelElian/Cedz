@@ -51,12 +51,17 @@
 
   function renderRevelationHistory() {
     const sort = app.querySelector('[data-revelation-sort]')?.value || 'recent';
-    const items = [...revelationItems].sort((a, b) => {
-      if (sort === 'author') return String(pick(a, 'authorName', 'author_name') || '').localeCompare(String(pick(b, 'authorName', 'author_name') || ''), 'fr');
+    const author = app.querySelector('[data-revelation-author]')?.value || '';
+    const type = app.querySelector('[data-revelation-type]')?.value || '';
+    const items = revelationItems.filter(item => {
+      const itemAuthor = String(pick(item, 'authorName', 'author_name') || '');
+      const itemType = String(pick(item, 'type', 'questionType', 'question_type') || '');
+      return (!author || itemAuthor === author) && (!type || (type === 'other' ? itemType !== 'ranking' : itemType === type));
+    }).sort((a, b) => {
       const delta = new Date(pick(a, 'sentAt', 'sent_at') || 0) - new Date(pick(b, 'sentAt', 'sent_at') || 0);
       return sort === 'oldest' ? delta : -delta;
     });
-    app.querySelector('[data-revelation-history]').innerHTML = items.length ? items.map(item => revelationMarkup(item)).join('') : '<div class="empty-state compact-empty"><strong>Personne n’a encore parlé.</strong><p>Enfin, officiellement.</p></div>';
+    app.querySelector('[data-revelation-history]').innerHTML = items.length ? items.map(item => revelationMarkup(item)).join('') : '<div class="empty-state compact-empty"><strong>Rien ne correspond à ce filtre.</strong><p>Change les filtres pour retrouver les autres dossiers.</p></div>';
   }
 
   function formatDate(value) {
@@ -143,6 +148,8 @@
       app.querySelector('[data-account-name]').textContent = name;
       app.querySelector('[data-account-avatar]').innerHTML = avatarMarkup(participant);
       const revelations = list(payload, 'revelations'); revelationItems = revelations;
+      const authorSelect = app.querySelector('[data-revelation-author]');
+      authorSelect.innerHTML = '<option value="">Tout le monde</option>' + [...new Set(revelations.map(item => pick(item, 'authorName', 'author_name')).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b), 'fr')).map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('');
       const latest = payload.latestRevelation || payload.latest_revelation || revelations[0];
       app.querySelector('[data-latest-revelation]').innerHTML = revelationMarkup(latest, true);
       renderRevelationHistory();
@@ -150,10 +157,6 @@
       renderAnswers(list(payload, 'answers'), participantNames);
       renderReplies(payload.repliesReceived || payload.replies_received || []);
       if(payload.dailyQuestionEnabled) renderDaily(payload.dailyQuestion, payload.previousDailyQuestions || payload.previous_daily_questions || []);
-      const catchUp = app.querySelector('[data-catch-up]');
-      const outstanding = Number(payload.unansweredPreviousDailyCount || 0);
-      catchUp.hidden = !(payload.answeredDailyQuestion && outstanding);
-      if (!catchUp.hidden) app.querySelector('[data-catch-up-copy]').textContent = `Il te reste ${outstanding} ancienne question${outstanding > 1 ? 's' : ''} à laquelle répondre.`;
       const questionnaire = payload.questionnaire || {};
       const link = app.querySelector('[data-questionnaire-link]');
       const questionnaireUrl = pick(payload, 'questionnaireUrl', 'questionnaire_url') || pick(questionnaire, 'url', 'questionnaireUrl', 'questionnaire_url');
@@ -197,7 +200,7 @@
   app.addEventListener('submit',async event=>{const form=event.target.closest('[data-daily-answer]');if(!form)return;event.preventDefault();if(!form.reportValidity())return;const button=form.querySelector('button'),status=form.querySelector('.form-note'),data=new FormData(form);let answer=data.get('answer');if(form.querySelector('.daily-choices'))answer={selectedParticipantId:answer,comment:data.get('comment')};button.disabled=true;status.textContent='Envoi…';try{await api('/api/account/daily-question/'+encodeURIComponent(form.dataset.dailyId)+'/answer',{method:'POST',body:JSON.stringify({answer})});form.innerHTML='<strong>Réponse enregistrée. Bien joué.</strong>';if(form.dataset.previous==='1')setTimeout(load,250);}catch(error){status.textContent=error.message;button.disabled=false;}});
 
   window.addEventListener('hashchange', applyTab);
-  app.querySelector('[data-revelation-sort]')?.addEventListener('change', renderRevelationHistory);
+  ['[data-revelation-sort]', '[data-revelation-author]', '[data-revelation-type]'].forEach(selector => app.querySelector(selector)?.addEventListener('change', renderRevelationHistory));
 
   load();
 })();
