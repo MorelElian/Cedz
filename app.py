@@ -2270,26 +2270,32 @@ def revelation_query(where: str = "") -> str:
               JOIN participants author ON author.id = r.author_participant_id""" + where
 
 
-def send_push_notification(participant_id: int, *, title: str, body: str, url: str) -> None:
+def send_push_notification(participant_id: int, *, title: str, body: str, url: str) -> dict[str, int]:
     if not current_app.config["VAPID_PUBLIC_KEY"] or not current_app.config["VAPID_PRIVATE_KEY"]:
-        return
+        return {"sent": 0, "failed": 0, "pruned": 0}
     db = _db()
+    result = {"sent": 0, "failed": 0, "pruned": 0}
     for row in db.execute("SELECT id,endpoint,subscription_json FROM push_subscriptions WHERE participant_id=?", (participant_id,)).fetchall():
         try:
             webpush(json.loads(row["subscription_json"]), data=json.dumps({"title": title, "body": body, "url": url}),
                     vapid_private_key=current_app.config["VAPID_PRIVATE_KEY"],
                     vapid_claims={"sub": current_app.config["VAPID_SUBJECT"]}, ttl=3600)
+            result["sent"] += 1
         except WebPushException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in {404, 410}:
                 db.execute("DELETE FROM push_subscriptions WHERE id=?", (row["id"],))
+                result["pruned"] += 1
             else:
                 current_app.logger.warning("Push delivery failed for participant %s", participant_id)
+                result["failed"] += 1
         except Exception:
             # Notifications are an extra convenience: a malformed or expired
             # browser subscription must never prevent an email/revelation send.
             current_app.logger.warning("Unexpected push delivery failure for participant %s", participant_id)
+            result["failed"] += 1
     db.commit()
+    return result
 
 
 def deliver_revelation(row: sqlite3.Row) -> dict[str, Any]:
@@ -2629,6 +2635,54 @@ def register_account_api(app: Flask) -> None:
 
 
 def register_admin_api(app: Flask) -> None:
+    @app.get("/api/admin/push-subscriptions")
+    @admin_required
+    def admin_push_subscriptions():
+        rows = _db().execute(
+            """SELECT p.id,p.display_name,p.is_active,COUNT(s.id) subscription_count,MAX(s.updated_at) last_subscribed_at
+               FROM participants p LEFT JOIN push_subscriptions s ON s.participant_id=p.id
+               GROUP BY p.id ORDER BY p.display_name"""
+        ).fetchall()
+        return jsonify({"participants": [{
+            "participantId": row["id"], "participant": row["display_name"], "isActive": bool(row["is_active"]),
+            "subscriptionCount": row["subscription_count"], "notificationsEnabled": bool(row["subscription_count"]),
+            "lastSubscribedAt": row["last_subscribed_at"],
+        } for row in rows]})
+
+    @app.post("/api/admin/push-notifications")
+    @admin_required
+    def admin_send_push_notifications():
+        data = json_body()
+        title, body, url = (str(data.get(key, "")).strip() for key in ("title", "body", "url"))
+        raw_ids = data.get("participantIds")
+        if not title or len(title) > 120 or not body or len(body) > 500:
+            abort_json(400, "Titre ou message de notification invalide.")
+        if not url.startswith("/") or url.startswith("//") or len(url) > 500:
+            abort_json(400, "Le lien doit être un chemin interne au site.")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            abort_json(400, "Choisis au moins un participant.")
+        try:
+            participant_ids = list(dict.fromkeys(int(value) for value in raw_ids))
+        except (TypeError, ValueError):
+            abort_json(400, "Liste de participants invalide.")
+        placeholders = ",".join("?" for _ in participant_ids)
+        people = _db().execute(
+            f"SELECT id,display_name FROM participants WHERE is_active=1 AND id IN ({placeholders}) ORDER BY display_name",
+            participant_ids,
+        ).fetchall()
+        result: dict[str, list[dict[str, Any]]] = {"sent": [], "failed": [], "skipped": []}
+        if not current_app.config["VAPID_PUBLIC_KEY"] or not current_app.config["VAPID_PRIVATE_KEY"]:
+            abort_json(409, "Les clés VAPID ne sont pas configurées sur le serveur.")
+        for person in people:
+            outcome = send_push_notification(person["id"], title=title, body=body, url=url)
+            if outcome["sent"]:
+                result["sent"].append({"participant": person["display_name"], "subscriptions": outcome["sent"]})
+            elif outcome["failed"]:
+                result["failed"].append({"participant": person["display_name"]})
+            else:
+                result["skipped"].append({"participant": person["display_name"], "reason": "no_subscription"})
+        return jsonify(result)
+
     @app.get("/api/admin/question-suggestions")
     @admin_required
     def admin_question_suggestions():

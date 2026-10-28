@@ -291,18 +291,10 @@ def test_daily_question_mail_cycle_keeps_previous_questions_and_never_duplicates
     assert dashboard["previousDailyQuestions"]
     previous = dashboard["previousDailyQuestions"][0]
     participant_csrf = {"X-CSRF-Token": dashboard["csrfToken"]}
-    if previous["type"] == "slider":
-        previous_answer = previous["scaleMin"]
-    elif previous["type"] in {"compare_two", "compare_three", "choose_one"}:
-        previous_answer = {"selectedParticipantId": previous["targets"][0]["id"], "comment": "Je rattrape mon retard."}
-    else:
-        previous_answer = "Je rattrape mon retard."
-    answer = client.post(
-        f"/api/account/daily-question/{previous['id']}/answer",
-        json={"answer": previous_answer}, headers=participant_csrf,
-    )
-    assert answer.status_code == 200
-
+    if previous["type"] == "slider": previous_answer = previous["scaleMin"]
+    elif previous["type"] in {"compare_two", "compare_three", "choose_one"}: previous_answer = {"selectedParticipantId": previous["targets"][0]["id"], "comment": "Je rattrape mon retard."}
+    else: previous_answer = "Je rattrape mon retard."
+    assert client.post(f"/api/account/daily-question/{previous['id']}/answer", json={"answer": previous_answer}, headers=participant_csrf).status_code == 200
     client.post("/logout")
     assert client.get("/api/admin/daily-question-mail-preview").status_code == 401
     csrf = admin_login(client)
@@ -311,8 +303,41 @@ def test_daily_question_mail_cycle_keeps_previous_questions_and_never_duplicates
     assert barbs_preview["subject"] == f"Barbs, {barbs_preview['question']['body']}"
     assert "Question bonus" in barbs_preview["html"]
     assert client.post("/api/jobs/daily-question-mails").status_code == 410
-    scheduled = client.post("/api/jobs/daily-question-mails", headers={"X-Cedz-Scheduler-Token": "job-secret"})
-    assert scheduled.status_code == 410
+    assert client.post("/api/jobs/daily-question-mails", headers={"X-Cedz-Scheduler-Token": "job-secret"}).status_code == 410
+
+
+def test_admin_can_list_and_send_push_notifications(client, app, monkeypatch):
+    csrf = admin_login(client)
+    barbs = next(person for person in client.get("/api/admin/participants", headers=csrf).get_json()["participants"]
+                 if person["displayName"] == "Barbs")
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        db.execute(
+            """INSERT INTO push_subscriptions(participant_id,endpoint,subscription_json,created_at,updated_at)
+               VALUES (?,?,?,?,?)""",
+            (barbs["id"], "https://push.example.test/barbs", json.dumps({"endpoint": "https://push.example.test/barbs", "keys": {"p256dh": "key", "auth": "auth"}}), "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
+        )
+        db.commit()
+    app.config.update(VAPID_PUBLIC_KEY="public", VAPID_PRIVATE_KEY="private")
+    sent = []
+    def fake_webpush(subscription_info, **kwargs):
+        sent.append((subscription_info, kwargs))
+    monkeypatch.setattr("app.webpush", fake_webpush)
+
+    subscriptions = client.get("/api/admin/push-subscriptions", headers=csrf)
+    assert subscriptions.status_code == 200
+    row = next(item for item in subscriptions.get_json()["participants"] if item["participantId"] == barbs["id"])
+    assert row["subscriptionCount"] == 1
+    assert row["notificationsEnabled"] is True
+
+    delivered = client.post(
+        "/api/admin/push-notifications",
+        json={"participantIds": [barbs["id"]], "title": "Rassemblement", "body": "Regarde Cedz.", "url": "/compte#home"},
+        headers=csrf,
+    )
+    assert delivered.status_code == 200
+    assert delivered.get_json()["sent"] == [{"participant": "Barbs", "subscriptions": 1}]
+    assert sent[0][1]["data"] == json.dumps({"title": "Rassemblement", "body": "Regarde Cedz.", "url": "/compte#home"})
+
 
 
 def test_unmailed_previous_daily_question_is_not_exposed(client, app, monkeypatch):

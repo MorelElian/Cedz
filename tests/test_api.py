@@ -109,11 +109,12 @@ def test_participant_can_save_own_push_subscription(client, app):
     assert '"endpoint": "https://push.example.test/subscription"' in row[1]
 
 
-def test_participant_account_includes_pwa_install_control(client):
+def test_participant_account_leaves_pwa_install_prompt_to_chrome(client):
     participant = client.get("/api/participants").get_json()["participants"][0]
     authenticate_as(client, participant["id"])
     page = client.get("/compte")
-    assert b'data-install-pwa' in page.data
+    assert b'data-install-pwa' not in page.data
+    assert b'beforeinstallprompt' not in client.get("/static/js/account.js").data
 
 
 def test_public_participant_pages_expose_pwa_but_admin_does_not(client):

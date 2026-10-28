@@ -25,6 +25,7 @@
     <button type="button" aria-selected="false" data-tab="sent">Historique envoyé</button>
     <button type="button" aria-selected="false" data-tab="phrases">Phrases d'intro</button>
     <button type="button" aria-selected="false" data-tab="feedback">Messages</button>
+    <button type="button" aria-selected="false" data-tab="push">Notifications</button>
   </nav>
 
   <div class="admin-live" role="status" aria-live="polite" data-admin-status></div>
@@ -48,6 +49,21 @@
         <button class="button button-primary button-small" type="submit">Mettre à jour</button>
       </form>
     </div>
+  </section>
+  <section class="admin-panel" data-panel="push" hidden>
+    <div class="panel-toolbar"><div><p class="eyebrow">PWA / navigateur</p><h2>Notifications</h2><p>On voit les personnes ayant activé les notifications, pas l’installation certaine de l’icône PWA.</p></div></div>
+    <div class="push-admin-grid">
+      <form class="admin-card stack-form" data-admin-push-form>
+        <label class="field"><span>Titre</span><input name="title" maxlength="120" required placeholder="Une nouvelle arrive."></label>
+        <label class="field"><span>Message</span><textarea name="body" maxlength="500" rows="4" required placeholder="Ouvre Cedz pour la découvrir."></textarea></label>
+        <label class="field"><span>Lien à ouvrir</span><input name="url" maxlength="500" required value="/compte#home"><small>Chemin interne, par exemple <code>/compte#home</code>.</small></label>
+        <label class="selection-all"><input type="checkbox" data-push-select-all> Sélectionner tous les abonnés actifs</label>
+        <button class="button button-primary" type="submit">Envoyer la notification</button>
+        <p class="form-note" data-admin-push-status role="status"></p>
+      </form>
+      <div class="admin-card"><div class="card-heading"><h2>Appareils abonnés</h2><span class="badge badge-active" data-push-enabled-count>—</span></div><div class="push-recipient-list" data-push-recipient-list><div class="loading-row">Chargement…</div></div></div>
+    </div>
+    <div class="admin-card" data-admin-push-result hidden></div>
   </section>
   <section class="admin-panel" data-panel="suggestions" hidden><div class="panel-toolbar"><div><h2>Suggestions à examiner</h2><p>Approuve-les pour les ajouter à la banque.</p></div></div><div class="answer-list" data-suggestion-list></div></section>
   <section class="admin-panel" data-panel="daily" hidden><div class="panel-toolbar"><div><h2>Questions bonus en cours</h2><p>Une question par participant. Regénère si besoin.</p></div><button class="button button-secondary button-small" type="button" data-reload-daily>Recharger</button></div><div class="answer-list" data-daily-list></div></section>
@@ -189,4 +205,4 @@
 </dialog>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily_mail.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily_mail.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_push.js') }}" defer></script>{% endblock %}
