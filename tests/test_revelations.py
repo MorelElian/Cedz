@@ -392,6 +392,32 @@ def test_daily_question_stays_tied_to_last_sent_mail_until_next_cycle(client, ap
     assert dashboard_after["dailyQuestion"]["id"] == prepared_id
 
 
+def test_dashboard_marks_catch_up_when_current_daily_question_is_answered(client, app, monkeypatch):
+    monkeypatch.setattr("app.deliver_email", lambda *_: "gmail_api")
+    csrf = admin_login(client)
+    barbs = next(person for person in client.get("/api/admin/participants").get_json()["participants"]
+                 if person["displayName"] == "Barbs")
+    assert client.patch(f"/api/admin/participants/{barbs['id']}", json={"email": "barbs@example.fr"}, headers=csrf).status_code == 200
+    set_password(client, csrf, barbs["id"])
+    with app.test_request_context("/", base_url="https://cedz.example"):
+        run_daily_question_mailer()
+    first = client.get("/api/admin/daily-questions", headers=csrf).get_json()["dailyQuestions"]
+    assert next(row for row in first if row["participantId"] == barbs["id"])["question"]
+    assert client.post(f"/api/admin/daily-questions/{barbs['id']}/regenerate", json={}, headers=csrf).status_code == 200
+    with app.test_request_context("/", base_url="https://cedz.example"):
+        run_daily_question_mailer(promote_prepared=True)
+    participant_csrf = participant_login(client, "Barbs")
+    dashboard = client.get("/api/account/dashboard").get_json()
+    current = dashboard["dailyQuestion"]
+    answer = current["scaleMin"] if current["type"] == "slider" else "Réponse du jour"
+    if current["type"] in {"compare_two", "compare_three", "choose_one"}:
+        answer = {"selectedParticipantId": current["targets"][0]["id"], "comment": "Réponse du jour"}
+    assert client.post(f"/api/account/daily-question/{current['id']}/answer", json={"answer": answer}, headers=participant_csrf).status_code == 200
+    after = client.get("/api/account/dashboard").get_json()
+    assert after["answeredDailyQuestion"] is True
+    assert after["unansweredPreviousDailyCount"] >= 1
+
+
 def test_admin_mail_batch_promotes_prepared_questions_without_waiting_48_hours(client, app, monkeypatch):
     deliveries = []
     monkeypatch.setattr("app.deliver_email", lambda recipient, subject, body: deliveries.append((recipient, subject)) or "gmail_api")

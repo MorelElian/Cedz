@@ -2391,6 +2391,10 @@ def register_account_api(app: Flask) -> None:
         # The participant only sees a question once its corresponding email was sent.
         daily = active_daily_question(participant["id"]) if daily_enabled else None
         previous_daily = previous_daily_questions(participant["id"]) if daily_enabled else []
+        answered_daily = bool(daily_enabled and not daily and db.execute(
+            "SELECT 1 FROM daily_questions WHERE participant_id=? AND status='answered' LIMIT 1",
+            (participant["id"],),
+        ).fetchone())
         return jsonify({
             "csrfToken": csrf_token(), "participant": participant_payload(participant),
             "questionnaire": questionnaire_payload,
@@ -2399,6 +2403,8 @@ def register_account_api(app: Flask) -> None:
             "dailyQuestion": daily_question_payload(daily) if daily else None,
             "previousDailyQuestions": [daily_question_payload(row) for row in previous_daily],
             "dailyQuestionEnabled": daily_enabled,
+            "answeredDailyQuestion": answered_daily,
+            "unansweredPreviousDailyCount": len(previous_daily),
         })
 
     @app.post("/api/account/question-suggestions")

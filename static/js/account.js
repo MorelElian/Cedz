@@ -7,6 +7,16 @@
   const pick = (object, ...keys) => keys.map(key => object?.[key]).find(value => value !== undefined && value !== null);
   const list = (payload, key) => Array.isArray(payload) ? payload : payload?.[key] || payload?.data?.[key] || [];
 
+  function applyTab() {
+    const tab = (location.hash || '#home').slice(1);
+    const active = ['home', 'revelations', 'answers', 'profile'].includes(tab) ? tab : 'home';
+    app.querySelectorAll('[data-account-view]').forEach(node => { node.hidden = node.dataset.accountView !== active; });
+    app.querySelectorAll('[data-account-tab]').forEach(node => {
+      const selected = node.dataset.accountTab === active;
+      node.classList.toggle('is-active', selected); node.setAttribute('aria-current', selected ? 'page' : 'false');
+    });
+  }
+
   async function api(path, options = {}) {
     const headers = {'Accept': 'application/json', ...(options.body ? {'Content-Type': 'application/json'} : {}), ...options.headers};
     if (options.method && options.method !== 'GET' && csrf) headers['X-CSRF-Token'] = csrf;
@@ -129,6 +139,10 @@
       renderAnswers(list(payload, 'answers'), participantNames);
       renderReplies(payload.repliesReceived || payload.replies_received || []);
       if(payload.dailyQuestionEnabled) renderDaily(payload.dailyQuestion, payload.previousDailyQuestions || payload.previous_daily_questions || []);
+      const catchUp = app.querySelector('[data-catch-up]');
+      const outstanding = Number(payload.unansweredPreviousDailyCount || 0);
+      catchUp.hidden = !(payload.answeredDailyQuestion && outstanding);
+      if (!catchUp.hidden) app.querySelector('[data-catch-up-copy]').textContent = `Il te reste ${outstanding} ancienne question${outstanding > 1 ? 's' : ''} à laquelle répondre.`;
       const questionnaire = payload.questionnaire || {};
       const link = app.querySelector('[data-questionnaire-link]');
       const questionnaireUrl = pick(payload, 'questionnaireUrl', 'questionnaire_url') || pick(questionnaire, 'url', 'questionnaireUrl', 'questionnaire_url');
@@ -147,6 +161,7 @@
       }
       app.querySelector('[data-account-loading]').hidden = true;
       app.querySelector('[data-account-content]').hidden = false;
+      applyTab();
     } catch (_) {
       app.querySelector('[data-account-loading]').hidden = true;
       app.querySelector('[data-account-error]').hidden = false;
@@ -169,6 +184,8 @@
   suggestionForm.elements.type.addEventListener('change',event=>{const markers={free_text:'{person}',slider:'{person}',compare_two:'{person1} et {person2}',compare_three:'{person1}, {person2} et {person3}',choose_one:''};suggestionForm.querySelector('[data-suggestion-help]').textContent=markers[event.target.value]?'Utilise '+markers[event.target.value]+' dans ta question.':'Pas de placeholder : la personne choisie sera proposée dans la réponse.';});
   suggestionForm.addEventListener('submit',async event=>{event.preventDefault();if(!suggestionForm.reportValidity())return;const button=suggestionForm.querySelector('[type="submit"]'),status=suggestionForm.querySelector('[data-suggestion-status]'),data=new FormData(suggestionForm),markers={free_text:'{person}',slider:'{person}',compare_two:'{person1} et {person2}',compare_three:'{person1}, {person2} et {person3}',choose_one:''},required=markers[data.get('type')],body=String(data.get('body')||'');if(required&&required.split(' et ').some(marker=>!body.includes(marker))){status.textContent='Ajoute '+required+' dans ta question pour que les participants soient tirés automatiquement.';suggestionForm.elements.body.focus();return;}button.disabled=true;try{await api('/api/account/question-suggestions',{method:'POST',body:JSON.stringify(Object.fromEntries(data))});suggestionForm.reset();suggestionDialog.close();}catch(error){status.textContent=error.message;}finally{button.disabled=false;}});
   app.addEventListener('submit',async event=>{const form=event.target.closest('[data-daily-answer]');if(!form)return;event.preventDefault();if(!form.reportValidity())return;const button=form.querySelector('button'),status=form.querySelector('.form-note'),data=new FormData(form);let answer=data.get('answer');if(form.querySelector('.daily-choices'))answer={selectedParticipantId:answer,comment:data.get('comment')};button.disabled=true;status.textContent='Envoi…';try{await api('/api/account/daily-question/'+encodeURIComponent(form.dataset.dailyId)+'/answer',{method:'POST',body:JSON.stringify({answer})});form.innerHTML='<strong>Réponse enregistrée. Bien joué.</strong>';if(form.dataset.previous==='1')setTimeout(load,250);}catch(error){status.textContent=error.message;button.disabled=false;}});
+
+  window.addEventListener('hashchange', applyTab);
 
   load();
 })();

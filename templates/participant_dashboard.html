@@ -9,17 +9,17 @@
 <section class="account-shell" data-account-app>
   <div class="account-loading" data-account-loading role="status"><span class="spinner" aria-hidden="true"></span> Ouverture du casier…</div>
   <div data-account-content hidden>
-    <header class="account-hero">
+    <header class="account-hero" data-account-view="home">
       <div class="account-avatar" data-account-avatar aria-hidden="true"></div>
       <div><p class="eyebrow">Espace participant</p><h1>Salut <em data-account-name>toi</em>.</h1><p>Tout ce qu'on a osé t'envoyer. Rien de plus.</p></div>
       <div class="account-actions"><a class="button button-secondary" data-questionnaire-link hidden>Finir mon questionnaire</a><button class="button button-primary" type="button" data-open-suggestion>Proposer une question</button><a class="button button-primary" data-review-answers hidden>Revoir mes réponses</a></div>
     </header>
 
-    <section class="account-section" aria-labelledby="latest-title">
+    <section class="account-section" aria-labelledby="latest-title" data-account-view="home">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Dernière livraison</p><h2 id="latest-title">Fraîchement balancé</h2></div></div>
       <div data-latest-revelation></div>
     </section>
-    <section class="account-section daily-section" data-daily-section hidden>
+    <section class="account-section daily-section" data-daily-section hidden data-account-view="home">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Question bonus</p><h2>Question du moment</h2></div></div>
       <div class="daily-question-card" data-daily-question></div>
       <details class="daily-history" data-previous-daily-section hidden>
@@ -27,29 +27,33 @@
         <div data-previous-daily-questions></div>
       </details>
     </section>
+    <section class="account-section catch-up-panel" data-catch-up hidden data-account-view="home">
+      <p class="eyebrow">Rattrapage</p><h2>Tu as répondu à la question du jour.</h2>
+      <p data-catch-up-copy></p><a class="button button-secondary" href="#profile">Voir les questions</a>
+    </section>
     <dialog class="compact-dialog" data-suggestion-dialog><form method="dialog" class="stack-form" data-suggestion-form><header><p class="eyebrow">Nouveau dossier</p><h2>Proposer une question</h2><p>Elle passera d'abord par le comité.</p></header><label class="field"><span>Type</span><select name="type"><option value="free_text">Réponse libre · une personne</option><option value="choose_one">Choisir une personne</option><option value="compare_two">Choix entre deux personnes</option><option value="compare_three">Choix entre trois personnes</option><option value="slider">Note / curseur · une personne</option></select></label><div class="suggestion-examples"><strong>Exemples selon le type</strong><ul><li><b>Réponse libre</b> : « Quel est le plus gros point fort de {person} ? »</li><li><b>Choisir une personne</b> : « Qui va le plus s'entraîner avant le T24 ? »</li><li><b>Deux personnes</b> : « Entre {person1} et {person2}, qui va tenir le plus longtemps ? »</li><li><b>Trois personnes</b> : « Entre {person1}, {person2} et {person3}, qui a le meilleur mental ? »</li><li><b>Note / curseur</b> : « Sur 10, à quel point {person} est prêt ? »</li></ul></div><label class="field"><span>Question</span><textarea name="body" maxlength="300" required placeholder="Que penses-tu de {person} ?"></textarea><small data-suggestion-help>Utilise {person} pour la personne tirée.</small></label><p class="form-note" data-suggestion-status></p><footer class="dialog-actions"><button class="button button-ghost" value="cancel">Annuler</button><button class="button button-primary" type="submit">Envoyer au comité</button></footer></form></dialog>
 
-    <section class="account-section" aria-labelledby="ranking-title">
+    <section class="account-section" aria-labelledby="ranking-title" data-account-view="profile">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Seulement ce que tu sais déjà</p><h2 id="ranking-title">Ta cote dans le vestiaire</h2></div></div>
       <div class="discipline-grid" data-rankings></div>
     </section>
 
-    <section class="account-section" aria-labelledby="history-title">
+    <section class="account-section" aria-labelledby="history-title" data-account-view="revelations">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Les dossiers sortis</p><h2 id="history-title">Ce qu'ils pensent de moi</h2></div></div>
       <div class="revelation-history" data-revelation-history></div>
     </section>
 
-    <section class="account-section" aria-labelledby="answers-title">
+    <section class="account-section" aria-labelledby="answers-title" data-account-view="answers">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Tes propres casseroles</p><h2 id="answers-title">Mes réponses</h2></div></div>
       <div class="answer-accordions" data-my-answers></div>
     </section>
 
-    <section class="account-section" aria-labelledby="received-replies-title">
+    <section class="account-section" aria-labelledby="received-replies-title" data-account-view="profile">
       <div class="section-heading compact-heading"><div><p class="eyebrow">Retour à l'envoyeur</p><h2 id="received-replies-title">Réponses reçues</h2></div></div>
       <div class="received-replies" data-replies-received></div>
     </section>
 
-    <details class="password-panel">
+    <details class="password-panel" data-account-view="profile">
       <summary>Changer mon mot de passe</summary>
       <form class="stack-form" data-password-form>
         <label class="field"><span>Mot de passe actuel</span><input type="password" name="currentPassword" autocomplete="current-password" required></label>
@@ -58,6 +62,9 @@
         <p class="form-note" data-password-status role="status"></p>
       </form>
     </details>
+    <nav class="participant-tabbar" aria-label="Navigation de l’espace participant">
+      <a href="#home" data-account-tab="home">Accueil</a><a href="#revelations" data-account-tab="revelations">Révélations</a><a href="#answers" data-account-tab="answers">Mes réponses</a><a href="#profile" data-account-tab="profile">Profil</a>
+    </nav>
   </div>
   <div class="error-state" data-account-error hidden><span aria-hidden="true">⚠</span><h2>Le casier est coincé.</h2><p>Recharge la page dans un instant.</p></div>
 </section>
