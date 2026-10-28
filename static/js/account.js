@@ -6,6 +6,7 @@
   const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
   const pick = (object, ...keys) => keys.map(key => object?.[key]).find(value => value !== undefined && value !== null);
   const list = (payload, key) => Array.isArray(payload) ? payload : payload?.[key] || payload?.data?.[key] || [];
+  let revelationItems = [];
 
   function applyTab() {
     const tab = (location.hash || '#home').slice(1);
@@ -46,6 +47,16 @@
       <p class="revelation-question">${esc(question)}</p><blockquote>${esc(content)}</blockquote>
       ${id ? `<a class="text-button" href="/revelations/${encodeURIComponent(id)}">Voir et répondre →</a>` : ''}
     </article>`;
+  }
+
+  function renderRevelationHistory() {
+    const sort = app.querySelector('[data-revelation-sort]')?.value || 'recent';
+    const items = [...revelationItems].sort((a, b) => {
+      if (sort === 'author') return String(pick(a, 'authorName', 'author_name') || '').localeCompare(String(pick(b, 'authorName', 'author_name') || ''), 'fr');
+      const delta = new Date(pick(a, 'sentAt', 'sent_at') || 0) - new Date(pick(b, 'sentAt', 'sent_at') || 0);
+      return sort === 'oldest' ? delta : -delta;
+    });
+    app.querySelector('[data-revelation-history]').innerHTML = items.length ? items.map(item => revelationMarkup(item)).join('') : '<div class="empty-state compact-empty"><strong>Personne n’a encore parlé.</strong><p>Enfin, officiellement.</p></div>';
   }
 
   function formatDate(value) {
@@ -131,10 +142,10 @@
       const name = pick(participant, 'displayName', 'display_name', 'name') || 'toi';
       app.querySelector('[data-account-name]').textContent = name;
       app.querySelector('[data-account-avatar]').innerHTML = avatarMarkup(participant);
-      const revelations = list(payload, 'revelations');
+      const revelations = list(payload, 'revelations'); revelationItems = revelations;
       const latest = payload.latestRevelation || payload.latest_revelation || revelations[0];
       app.querySelector('[data-latest-revelation]').innerHTML = revelationMarkup(latest, true);
-      app.querySelector('[data-revelation-history]').innerHTML = revelations.length ? revelations.map(item => revelationMarkup(item)).join('') : '<div class="empty-state compact-empty"><strong>Personne n’a encore parlé.</strong><p>Enfin, officiellement.</p></div>';
+      renderRevelationHistory();
       renderRankings(payload.rankingStats || payload.ranking_stats || payload.rankings || payload.averageRankings || payload.average_rankings || {});
       renderAnswers(list(payload, 'answers'), participantNames);
       renderReplies(payload.repliesReceived || payload.replies_received || []);
@@ -186,6 +197,7 @@
   app.addEventListener('submit',async event=>{const form=event.target.closest('[data-daily-answer]');if(!form)return;event.preventDefault();if(!form.reportValidity())return;const button=form.querySelector('button'),status=form.querySelector('.form-note'),data=new FormData(form);let answer=data.get('answer');if(form.querySelector('.daily-choices'))answer={selectedParticipantId:answer,comment:data.get('comment')};button.disabled=true;status.textContent='Envoi…';try{await api('/api/account/daily-question/'+encodeURIComponent(form.dataset.dailyId)+'/answer',{method:'POST',body:JSON.stringify({answer})});form.innerHTML='<strong>Réponse enregistrée. Bien joué.</strong>';if(form.dataset.previous==='1')setTimeout(load,250);}catch(error){status.textContent=error.message;button.disabled=false;}});
 
   window.addEventListener('hashchange', applyTab);
+  app.querySelector('[data-revelation-sort]')?.addEventListener('change', renderRevelationHistory);
 
   load();
 })();

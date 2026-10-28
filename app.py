@@ -2391,10 +2391,13 @@ def register_account_api(app: Flask) -> None:
         # The participant only sees a question once its corresponding email was sent.
         daily = active_daily_question(participant["id"]) if daily_enabled else None
         previous_daily = previous_daily_questions(participant["id"]) if daily_enabled else []
-        answered_daily = bool(daily_enabled and not daily and db.execute(
-            "SELECT 1 FROM daily_questions WHERE participant_id=? AND status='answered' LIMIT 1",
+        latest_delivery = db.execute(
+            """SELECT d.status FROM daily_question_mail_deliveries m
+               JOIN daily_questions d ON d.id=m.daily_question_id
+               WHERE m.participant_id=? ORDER BY m.sent_at DESC,m.id DESC LIMIT 1""",
             (participant["id"],),
-        ).fetchone())
+        ).fetchone()
+        answered_daily = bool(daily_enabled and latest_delivery and latest_delivery["status"] == "answered")
         return jsonify({
             "csrfToken": csrf_token(), "participant": participant_payload(participant),
             "questionnaire": questionnaire_payload,
