@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#111a35">
   <meta name="description" content="Cedz Are Shooting — le questionnaire du T24.">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  {% if session.get('participant_id') %}<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon.svg') }}">{% endif %}
+  {% if session.get('participant_id') %}<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon-192.png') }}">{% endif %}
   <title>{% block title %}Cedz Are Shooting{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/background.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">

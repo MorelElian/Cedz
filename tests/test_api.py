@@ -82,6 +82,17 @@ def test_pwa_manifest_and_service_worker_are_public_static_only(client):
     assert "notificationclick" in body
 
 
+def test_pwa_manifest_serves_chrome_compatible_png_icons(client):
+    manifest = client.get("/manifest.webmanifest").get_json()
+    icons = {icon["sizes"]: icon for icon in manifest["icons"]}
+    for size in ("192x192", "512x512"):
+        icon = icons[size]
+        assert icon["type"] == "image/png"
+        response = client.get(icon["src"])
+        assert response.status_code == 200
+        assert response.mimetype == "image/png"
+
+
 def test_participant_can_save_own_push_subscription(client, app):
     participant = client.get("/api/participants").get_json()["participants"][0]
     authenticate_as(client, participant["id"])
@@ -96,6 +107,13 @@ def test_participant_can_save_own_push_subscription(client, app):
         row = db.execute("SELECT participant_id,subscription_json FROM push_subscriptions").fetchone()
     assert row[0] == participant["id"]
     assert '"endpoint": "https://push.example.test/subscription"' in row[1]
+
+
+def test_participant_account_includes_pwa_install_control(client):
+    participant = client.get("/api/participants").get_json()["participants"][0]
+    authenticate_as(client, participant["id"])
+    page = client.get("/compte")
+    assert b'data-install-pwa' in page.data
 
 
 def valid_answer(question, participant_ids):

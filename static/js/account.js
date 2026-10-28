@@ -8,6 +8,27 @@
   const pick = (object, ...keys) => keys.map(key => object?.[key]).find(value => value !== undefined && value !== null);
   const list = (payload, key) => Array.isArray(payload) ? payload : payload?.[key] || payload?.data?.[key] || [];
   let revelationItems = [];
+  let deferredInstallPrompt = null;
+  const installButton = app.querySelector('[data-install-pwa]');
+
+  window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    if (installButton) installButton.hidden = false;
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+    if (installButton) installButton.hidden = true;
+  });
+  installButton?.addEventListener('click', async () => {
+    if (!deferredInstallPrompt) return;
+    installButton.disabled = true;
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    installButton.hidden = true;
+    installButton.disabled = false;
+  });
 
   function vapidKeyToBytes(value) {
     const padding = '='.repeat((4 - value.length % 4) % 4);
