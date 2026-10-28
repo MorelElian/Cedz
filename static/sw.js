@@ -28,6 +28,10 @@ self.addEventListener('push', event => {
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const target = new URL(event.notification.data?.url || '/compte#home', self.location.origin).href;
+  if (new URL(target).origin !== self.location.origin) {
+    event.waitUntil(clients.openWindow(target));
+    return;
+  }
   event.waitUntil(clients.matchAll({type: 'window', includeUncontrolled: true}).then(windows => {
     const existing = windows.find(client => client.url.startsWith(self.location.origin));
     if (existing) return existing.focus().then(() => existing.navigate(target));

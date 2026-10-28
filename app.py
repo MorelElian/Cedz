@@ -20,7 +20,7 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -2657,8 +2657,11 @@ def register_admin_api(app: Flask) -> None:
         raw_ids = data.get("participantIds")
         if not title or len(title) > 120 or not body or len(body) > 500:
             abort_json(400, "Titre ou message de notification invalide.")
-        if not url.startswith("/") or url.startswith("//") or len(url) > 500:
-            abort_json(400, "Le lien doit être un chemin interne au site.")
+        parsed_url = urlparse(url)
+        is_internal_path = url.startswith("/") and not url.startswith("//")
+        is_external_https = parsed_url.scheme == "https" and bool(parsed_url.netloc)
+        if len(url) > 500 or not (is_internal_path or is_external_https):
+            abort_json(400, "Le lien doit être un chemin interne ou une URL HTTPS.")
         if not isinstance(raw_ids, list) or not raw_ids:
             abort_json(400, "Choisis au moins un participant.")
         try:

@@ -338,6 +338,14 @@ def test_admin_can_list_and_send_push_notifications(client, app, monkeypatch):
     assert delivered.get_json()["sent"] == [{"participant": "Barbs", "subscriptions": 1}]
     assert sent[0][1]["data"] == json.dumps({"title": "Rassemblement", "body": "Regarde Cedz.", "url": "/compte#home"})
 
+    external = client.post(
+        "/api/admin/push-notifications",
+        json={"participantIds": [barbs["id"]], "title": "Lien externe", "body": "À voir.", "url": "https://example.com/brief"},
+        headers=csrf,
+    )
+    assert external.status_code == 200
+    assert sent[-1][1]["data"] == json.dumps({"title": "Lien externe", "body": "À voir.", "url": "https://example.com/brief"})
+
 
 
 def test_unmailed_previous_daily_question_is_not_exposed(client, app, monkeypatch):
