@@ -77,7 +77,7 @@ def test_pwa_manifest_and_service_worker_are_public_static_only(client):
     assert worker.mimetype == "application/javascript"
     assert worker.headers["Service-Worker-Allowed"] == "/"
     body = worker.get_data(as_text=True)
-    assert "const CACHE = 'cedz-public-v2'" in body
+    assert "const CACHE = 'cedz-public-v3'" in body
     assert "/api/" not in body
     assert "cache.addAll" in body
     assert "notificationclick" in body

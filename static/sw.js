@@ -1,4 +1,4 @@
-const CACHE = 'cedz-public-v2';
+const CACHE = 'cedz-public-v3';
 const ASSETS = ['/offline', '/static/css/app.css', '/static/css/background.css', '/static/pwa-icon.svg', '/static/favicon.svg'];
 
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())));
