@@ -23,6 +23,7 @@
     <button type="button" aria-selected="false" data-tab="answers">Réponses</button>
     <button type="button" aria-selected="false" data-tab="revelations">Révélations</button>
     <button type="button" aria-selected="false" data-tab="sent">Révélations envoyées</button>
+    <button type="button" aria-selected="false" data-tab="inventory">Suivi révélations</button>
     <button type="button" aria-selected="false" data-tab="phrases">Phrases d'intro</button>
     <button type="button" aria-selected="false" data-tab="feedback">Messages</button>
     <button type="button" aria-selected="false" data-tab="push">Notifications</button>
@@ -128,6 +129,11 @@
     <div class="revelation-review-grid" data-revelation-review-grid><div class="admin-card loading-row">Chargement…</div></div>
   </section>
 
+  <section class="admin-panel" data-panel="inventory" hidden data-revelation-inventory>
+    <div class="panel-toolbar"><div><p class="eyebrow">Vue complète par personne</p><h2>Suivi des révélations</h2><p>Tout ce qui a été envoyé et tout ce qui reste disponible dans le pool.</p></div></div>
+    <div class="inventory-layout"><nav class="inventory-people" aria-label="Participants" data-inventory-people><div class="loading-row">Chargement…</div></nav><div data-inventory-detail><div class="admin-card loading-row">Choisis un participant.</div></div></div>
+  </section>
+
   <section class="admin-panel" data-panel="sent" hidden>
     <div class="panel-toolbar"><div><p class="eyebrow">Les révélations dévoilées</p><h2>Révélations envoyées</h2><p>Les plus récentes apparaissent en premier. Ce contenu est exactement celui reçu par les participants.</p></div></div>
     <div class="sent-history" data-sent-history><div class="admin-card loading-row">Chargement…</div></div>
@@ -207,4 +213,4 @@
 </dialog>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily_mail.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_push.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_peloton.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily_mail.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_push.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_peloton.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_inventory.js') }}" defer></script>{% endblock %}
