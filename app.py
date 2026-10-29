@@ -2798,7 +2798,7 @@ def register_admin_api(app: Flask) -> None:
         if not person: abort_json(404, "Participant introuvable.")
         rows = _db().execute(revelation_query(" WHERE r.recipient_participant_id=? AND r.status='sent' ORDER BY r.sent_at DESC"), (participant_id,)).fetchall()
         chosen = [row["revelation_id"] for row in _db().execute("SELECT revelation_id FROM peloton_featured_revelations WHERE profile_participant_id=? ORDER BY position", (participant_id,))]
-        return jsonify({"participantId": participant_id, "featuredRevelationIds": chosen, "revelations": [{"id":row["id"],"question":json.loads(row["content_json"]).get("question",""),"content":row["final_content"],"sentAt":row["sent_at"]} for row in rows]})
+        return jsonify({"participantId": participant_id, "featuredRevelationIds": chosen, "revelations": [{"id":row["id"],"question":json.loads(row["content_json"]).get("question",""),"content":revelation_payload(row)["finalContent"],"sentAt":row["sent_at"]} for row in rows]})
 
     @app.put("/api/admin/peloton/<int:participant_id>/featured-revelations")
     @admin_required

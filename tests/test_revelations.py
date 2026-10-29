@@ -753,6 +753,22 @@ def test_participant_can_complete_public_peloton_profile(client):
     assert public_profile["weightKg"] == 72.5
 
 
+def test_admin_peloton_revelation_list_uses_generated_content_when_not_edited(client, app):
+    csrf = admin_login(client)
+    participant = client.get("/api/admin/participants", headers=csrf).get_json()["participants"][0]
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        revelation_id = db.execute(
+            "SELECT id FROM revelations WHERE recipient_participant_id=? ORDER BY id LIMIT 1", (participant["id"],)
+        ).fetchone()[0]
+        db.execute("UPDATE revelations SET status='sent',sent_at=?,final_content=NULL WHERE id=?", ("2026-10-12T12:00:00+00:00", revelation_id))
+        db.commit()
+
+    response = client.get(f"/api/admin/peloton/{participant['id']}", headers=csrf)
+    assert response.status_code == 200
+    item = next(item for item in response.get_json()["revelations"] if item["id"] == revelation_id)
+    assert item["content"]
+
+
 def test_login_rejects_external_next_redirect(client):
     csrf = admin_login(client)
     rov = next(person for person in client.get("/api/admin/participants").get_json()["participants"]
