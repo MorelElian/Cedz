@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app import DEFAULT_INTRO_PHRASES, MailDeliveryError, choose_intro, create_app, deliver_email, run_daily_question_mailer
+from app import DEFAULT_INTRO_PHRASES, MailDeliveryError, choose_intro, create_app, deliver_email, init_db, run_daily_question_mailer
 
 
 @pytest.fixture()
@@ -646,6 +646,39 @@ def test_admin_revelation_inventory_separates_sent_and_remaining(client, app):
     assert [row["id"] for row in payload["sent"][:2]] == [rows[1][0], rows[0][0]]
     assert rows[2][0] in {row["id"] for row in payload["remaining"]}
     assert all(row["answerSummary"] for row in payload["sent"] + payload["remaining"])
+
+
+def test_putting_a_revelation_back_later_keeps_it_available_in_inventory(client, app):
+    csrf = admin_login(client)
+    current = client.get("/api/admin/revelations/review", headers=csrf).get_json()["revelations"][0]
+    refreshed = client.post(
+        f"/api/admin/revelations/{current['id']}/refresh",
+        json={"action": "later"}, headers=csrf,
+    )
+    assert refreshed.status_code == 200
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        status = db.execute("SELECT status FROM revelations WHERE id=?", (current["id"],)).fetchone()[0]
+    assert status == "candidate"
+
+    summary = client.get("/api/admin/revelation-inventory", headers=csrf).get_json()
+    person = next(item for item in summary["participants"] if item["id"] == current["recipientId"])
+    detail = client.get(f"/api/admin/revelation-inventory/{current['recipientId']}", headers=csrf).get_json()
+
+    assert person["remainingCount"] >= 1
+    assert current["id"] in {item["id"] for item in detail["remaining"]}
+
+
+def test_database_initialization_restores_legacy_skipped_revelations(app):
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        row_id = db.execute("SELECT id FROM revelations WHERE status='candidate' LIMIT 1").fetchone()[0]
+        db.execute("UPDATE revelations SET status='skipped' WHERE id=?", (row_id,))
+        db.commit()
+
+    with app.app_context():
+        init_db()
+
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        assert db.execute("SELECT status FROM revelations WHERE id=?", (row_id,)).fetchone()[0] == "candidate"
 
 
 def test_admin_revelation_inventory_reports_each_ranking_discipline(client, app):

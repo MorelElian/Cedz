@@ -59,7 +59,7 @@ TARGET_MODES = {"none", "one_person", "two_people", "three_people", "all_people"
 QUESTIONNAIRE_TARGET_SIZE = 30
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PHONE_RE = re.compile(r"^\+?[0-9][0-9 .()\-]{6,24}$")
-REVELATION_STATUSES = {"candidate", "in_review", "skipped", "rejected", "sent"}
+REVELATION_STATUSES = {"candidate", "in_review", "rejected", "sent"}
 INTRO_TONES = {"pique", "positif"}
 INTRO_PHRASE_CATALOG_VERSION = "2"
 LEGACY_INTRO_PHRASES = (
@@ -503,6 +503,9 @@ def init_db() -> None:
            )
            WHERE source_key LIKE 'daily:%' AND source_created_at IS NULL"""
     )
+    # "Remettre plus tard" means available again. Older deployments stored
+    # that transient action as "skipped", which hid otherwise usable rows.
+    _db().execute("UPDATE revelations SET status='candidate' WHERE status='skipped'")
     _db().commit()
 
 
@@ -2389,7 +2392,7 @@ def select_review_candidate(participant_id: int, exclude_id: int | None = None) 
         (participant_id,),
     ).fetchone()
     rows = db.execute(
-        revelation_query(" WHERE r.recipient_participant_id=? AND r.status IN ('candidate','skipped') ORDER BY CASE r.status WHEN 'candidate' THEN 0 ELSE 1 END, r.id"),
+        revelation_query(" WHERE r.recipient_participant_id=? AND r.status='candidate' ORDER BY r.id"),
         (participant_id,),
     ).fetchall()
     rows = [row for row in rows if row["id"] != exclude_id]
@@ -3315,7 +3318,7 @@ def register_admin_api(app: Flask) -> None:
                 item["revealedCount"] += 1
             elif row["status"] == "in_review":
                 item["readyCount"] += 1
-            elif row["status"] in {"candidate", "skipped"}:
+            elif row["status"] == "candidate":
                 item["remainingCount"] += 1
             elif row["status"] == "rejected":
                 item["rejectedCount"] += 1
@@ -3416,7 +3419,7 @@ def register_admin_api(app: Flask) -> None:
         if not row:
             abort_json(404, "Proposition en review introuvable.")
         _db().execute("UPDATE revelations SET status=?, updated_at=? WHERE id=?",
-                      ("skipped" if action == "later" else "rejected", utcnow(), revelation_id))
+                      ("candidate" if action == "later" else "rejected", utcnow(), revelation_id))
         _db().commit()
         replacement = select_review_candidate(row["recipient_participant_id"], exclude_id=revelation_id)
         return jsonify({"revelation": revelation_payload(replacement, admin=True) if replacement else None})
