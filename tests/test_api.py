@@ -127,6 +127,14 @@ def test_public_participant_pages_expose_pwa_but_admin_does_not(client):
     assert b'rel="manifest" href="/manifest.webmanifest"' not in client.get("/admin/login").data
 
 
+def test_admin_import_script_announces_details_and_refreshes_dependents(client):
+    script = client.get("/static/js/admin_revelations.js").get_data(as_text=True)
+    dashboard = client.get("/static/js/admin.js").get_data(as_text=True)
+    assert "candidats créés" in script
+    assert "cedz:answers-imported" in script
+    assert "cedz:answers-imported" in dashboard
+
+
 def valid_answer(question, participant_ids):
     question_type = question["type"]
     if question_type in {"free_text", "single_person_answer"}:

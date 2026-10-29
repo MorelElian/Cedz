@@ -188,5 +188,6 @@
     passwordDialog.querySelector('[data-admin-password-form]').addEventListener('submit',async event=>{event.preventDefault();if(!event.currentTarget.reportValidity())return;const button=event.currentTarget.querySelector('button[type="submit"]');const status=passwordDialog.querySelector('[data-admin-password-status]');const id=event.currentTarget.elements.participantId.value;button.disabled=true;status.textContent='Mise à jour…';try{await api(`/api/admin/participants/${encodeURIComponent(id)}/password`,{method:'PATCH',body:JSON.stringify({password:event.currentTarget.elements.password.value})});const participant=state.participants.find(item=>String(item.id)===String(id));if(participant)participant.hasPassword=true;event.currentTarget.reset();passwordDialog.close();announce('Mot de passe participant mis à jour.');}catch(reason){status.textContent=reason.message;}finally{button.disabled=false;}});
   }
 
+  window.addEventListener('cedz:answers-imported',()=>loadAll());
   bindTabs();bindActions();ensureCsrf().then(loadAll);
 })();
