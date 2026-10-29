@@ -846,6 +846,14 @@ def test_peloton_uses_latest_sent_revelations_and_only_shows_popular_when_intera
     assert reaction["label"] == "validé" and reaction["count"] == 1
 
 
+def test_peloton_reaction_controls_use_compact_long_press_people_popover(app):
+    script = Path(app.root_path, "static", "js", "peloton.js").read_text(encoding="utf-8")
+    assert "👍 Mérité" in script
+    assert "😬 C’est grave" in script
+    assert "reaction-popover" in script
+    assert "pointerdown" in script
+
+
 def test_admin_peloton_revelation_list_uses_generated_content_when_not_edited(client, app):
     csrf = admin_login(client)
     participant = client.get("/api/admin/participants", headers=csrf).get_json()["participants"][0]
