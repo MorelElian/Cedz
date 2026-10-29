@@ -223,12 +223,10 @@ def test_import_rebuilds_sessions_progress_and_fresh_database_emails(client, app
     diego = next(person for person in people if person["displayName"] == "Diego")
     set_password(client, csrf, diego["id"])
     participant_login(client, "Diego")
-    dashboard = client.get("/api/account/dashboard").get_json()
-    assert dashboard["questionnaire"]["completed"] is False
-    assert dashboard["questionnaire"]["answeredCount"] == 18
-    assert dashboard["questionnaire"]["remainingCount"] == 12
-    assert dashboard["questionnaire"]["totalCount"] == 30
-    questions = client.get(f"/api/sessions/{dashboard['questionnaire']['sessionId']}/questions").get_json()
+    assert client.get("/api/account/dashboard").status_code == 409
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        session_id = db.execute("SELECT id FROM answer_sessions WHERE participant_id=?", (diego["id"],)).fetchone()[0]
+    questions = client.get(f"/api/sessions/{session_id}/questions").get_json()
     assert len(questions["answersByInstance"]) == 18
     assert len(questions["questions"]) == 12
     assert questions["remainingCount"] == 12
@@ -790,11 +788,8 @@ def test_login_hashes_password_and_isolates_questionnaires(client, app):
     for person in participants:
         set_password(client, csrf, person["id"])
     participant_login(client, participants[0]["displayName"])
-    created = client.post("/api/sessions", json={
-        "participantId": participants[0]["id"], "email": "first@example.fr", "phone": "",
-    })
-    assert created.status_code == 201
-    session_id = created.get_json()["sessionId"]
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        session_id = db.execute("SELECT id FROM answer_sessions WHERE participant_id=?", (participants[0]["id"],)).fetchone()[0]
     participant_login(client, participants[1]["displayName"])
     assert client.get(f"/api/sessions/{session_id}/questions").status_code == 403
     participant_login(client, participants[0]["displayName"])
@@ -851,7 +846,30 @@ def test_login_rejects_external_next_redirect(client):
     set_password(client, csrf, rov["id"])
     response = client.post("/login?next=https://evil.example", json={"name": "Rov", "password": "mot-de-passe"})
     assert response.status_code == 200
-    assert response.get_json()["redirectUrl"] in {"/compte", "/mon-compte"}
+    assert response.get_json()["redirectUrl"].startswith("/questionnaire/")
+
+
+def test_new_participant_is_forced_through_profile_and_questionnaire_before_account(client, app):
+    csrf = admin_login(client)
+    rov = next(person for person in client.get("/api/admin/participants", headers=csrf).get_json()["participants"]
+               if person["displayName"] == "Rov")
+    set_password(client, csrf, rov["id"])
+
+    login = client.post("/login", json={"name": "Rov", "password": "mot-de-passe"})
+    assert login.status_code == 200
+    questionnaire_url = login.get_json()["redirectUrl"]
+    assert questionnaire_url.startswith("/questionnaire/")
+    assert client.get("/compte").status_code == 302
+    assert client.get("/api/account/dashboard").status_code == 409
+    questionnaire_page = client.get(questionnaire_url)
+    assert b'data-onboarding-required="true"' in questionnaire_page.data
+
+    token = login.get_json()["csrfToken"]
+    saved_profile = client.put("/api/onboarding/profile", json={
+        "profileTagline": "Toujours partant.", "heightCm": 181, "weightKg": 72.5,
+    }, headers={"X-CSRF-Token": token})
+    assert saved_profile.status_code == 200
+    assert saved_profile.get_json()["profileTagline"] == "Toujours partant."
 
 
 def test_participant_can_change_password_and_old_password_stops_working(client):

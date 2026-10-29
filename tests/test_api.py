@@ -95,7 +95,10 @@ def test_pwa_manifest_serves_chrome_compatible_png_icons(client):
 
 
 def test_participant_can_save_own_push_subscription(client, app):
-    participant = client.get("/api/participants").get_json()["participants"][0]
+    participant = next(item for item in client.get("/api/participants").get_json()["participants"] if item["displayName"] == "Barbs")
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        db.execute("INSERT INTO answer_sessions(id,participant_id,email,phone,status,started_at,created_at,updated_at) VALUES ('done-push',?,'','','completed','now','now','now')", (participant["id"],))
+        db.commit()
     authenticate_as(client, participant["id"])
     dashboard = client.get("/api/account/dashboard").get_json()
     response = client.post(
@@ -111,7 +114,10 @@ def test_participant_can_save_own_push_subscription(client, app):
 
 
 def test_participant_account_leaves_pwa_install_prompt_to_chrome(client):
-    participant = client.get("/api/participants").get_json()["participants"][0]
+    participant = next(item for item in client.get("/api/participants").get_json()["participants"] if item["displayName"] == "Barbs")
+    with sqlite3.connect(client.application.config["DATABASE"]) as db:
+        db.execute("INSERT INTO answer_sessions(id,participant_id,email,phone,status,started_at,created_at,updated_at) VALUES ('done-pwa',?,'','','completed','now','now','now')", (participant["id"],))
+        db.commit()
     authenticate_as(client, participant["id"])
     page = client.get("/compte")
     assert b'data-install-pwa' not in page.data

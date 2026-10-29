@@ -19,6 +19,7 @@
   const quoteSource = document.querySelector('[data-question-quote-source]');
   const reviewList = app.querySelector('[data-review-question-list]');
   const reviewSelect = app.querySelector('[data-review-question-select]');
+  let onboardingRequired = !reviewMode && app.dataset.onboardingRequired === 'true';
   const quotes = [
     {text: 'Il faut avoir de la persévérance, et surtout de la confiance en soi.', author: 'Marie Curie', url: 'https://fr.wikiquote.org/wiki/Marie_Curie'},
     {text: "Le génie n'est qu'une plus grande aptitude à la patience.", author: 'Buffon', url: 'https://fr.wikiquote.org/wiki/Patience'},
@@ -46,6 +47,11 @@
 
   async function load() {
     stage.setAttribute('aria-busy', 'true');
+    if (onboardingRequired) {
+      renderOnboarding();
+      stage.setAttribute('aria-busy', 'false');
+      return;
+    }
     try {
       const reviewQuery = reviewMode ? '?review=1' : '';
       const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/questions${reviewQuery}`, {headers: {'Accept':'application/json'}});
@@ -70,6 +76,26 @@
       render();
     } catch (_) { showError(); }
     finally { stage.setAttribute('aria-busy', 'false'); }
+  }
+
+  function renderOnboarding() {
+    nav.hidden = true;
+    currentLabel.textContent = '0'; totalLabel.textContent = '30'; progressBar.style.width = '0%';
+    const form = document.createElement('form'); form.className = 'question-card onboarding-profile';
+    form.innerHTML = `<div class="question-meta"><span>Ton profil</span><span>Avant de commencer</span></div><h2>Présente-toi au Peloton.</h2><p class="question-help">Ces infos seront visibles sur ta fiche une fois le questionnaire terminé.</p><label class="field"><span>Phrase d’accroche</span><input name="profileTagline" maxlength="120" required placeholder="Ex. Le vélo est une religion."></label><div class="profile-measurements"><label class="field"><span>Taille (cm)</span><input name="heightCm" type="number" min="100" max="250" required placeholder="181"></label><label class="field"><span>Poids (kg)</span><input name="weightKg" type="number" min="30" max="250" step="0.1" required placeholder="72,5"></label></div><p class="form-error" role="alert" hidden></p><button class="button button-primary" type="submit">Commencer les 30 questions <span aria-hidden="true">→</span></button>`;
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = form.querySelector('button'); const error = form.querySelector('.form-error');
+      button.disabled = true; error.hidden = true;
+      try {
+        const values = new FormData(form);
+        const response = await fetch('/api/onboarding/profile', {method:'PUT', headers:{'Accept':'application/json','Content-Type':'application/json'}, body:JSON.stringify({profileTagline:values.get('profileTagline'),heightCm:values.get('heightCm'),weightKg:values.get('weightKg')})});
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw Error(payload.error || 'Enregistrement impossible.');
+        onboardingRequired = false; load();
+      } catch (reason) { error.textContent = reason.message; error.hidden = false; button.disabled = false; }
+    });
+    stage.replaceChildren(form);
   }
 
   function showEmpty() {

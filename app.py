@@ -1277,6 +1277,8 @@ def participant_required(view):
                 abort_json(401, "Authentification participant requise.")
             return redirect(url_for("participant_login", next=request.path))
         g.current_participant = participant
+        if request.path.startswith("/api/account/") and not questionnaire_is_complete(participant["id"]):
+            abort_json(409, "Termine d'abord ton questionnaire.")
         return view(*args, **kwargs)
 
     return wrapped
@@ -1367,6 +1369,35 @@ def get_answer_session(session_id: str) -> sqlite3.Row:
     if canonical and canonical["id"] != session_id:
         abort_json(410, "Cette ancienne session a été remplacée par la participation principale.")
     return row
+
+
+def primary_questionnaire_session(participant_id: int) -> sqlite3.Row | None:
+    return _db().execute(
+        """SELECT s.* FROM answer_sessions s LEFT JOIN answers a ON a.session_id=s.id
+           WHERE s.participant_id=? GROUP BY s.id
+           ORDER BY COUNT(a.id) DESC,s.created_at,s.id LIMIT 1""",
+        (participant_id,),
+    ).fetchone()
+
+
+def ensure_questionnaire_session(participant: sqlite3.Row) -> sqlite3.Row:
+    existing = primary_questionnaire_session(participant["id"])
+    if existing:
+        return existing
+    now, session_id = utcnow(), secrets.token_urlsafe(32)
+    _db().execute(
+        """INSERT INTO answer_sessions(id,participant_id,email,phone,resume_token_hash,status,started_at,created_at,updated_at)
+           VALUES (?,?,?,?,?,'started',?,?,?)""",
+        (session_id, participant["id"], participant["email"] or "", participant["phone"] or "",
+         resume_token_hash(secrets.token_urlsafe(24)), now, now, now),
+    )
+    _db().commit()
+    return _db().execute("SELECT * FROM answer_sessions WHERE id=?", (session_id,)).fetchone()
+
+
+def questionnaire_is_complete(participant_id: int) -> bool:
+    row = primary_questionnaire_session(participant_id)
+    return bool(row and row["status"] == "completed")
 
 
 def session_question_rows(session_id: str, participant_id: int) -> list[sqlite3.Row]:
@@ -1564,7 +1595,10 @@ def register_routes(app: Flask) -> None:
                 session.clear()
                 session["participant_id"] = participant["id"]
                 token = csrf_token()
-                destination = request.args.get("next") or url_for("account_page")
+                questionnaire_session = ensure_questionnaire_session(participant)
+                destination = (url_for("questionnaire", session_id=questionnaire_session["id"])
+                               if questionnaire_session["status"] != "completed"
+                               else request.args.get("next") or url_for("account_page"))
                 if not destination.startswith("/") or destination.startswith("//"):
                     destination = url_for("account_page")
                 if request.is_json:
@@ -1584,6 +1618,10 @@ def register_routes(app: Flask) -> None:
     @app.get("/mon-compte")
     @participant_required
     def account_page():
+        questionnaire_session = primary_questionnaire_session(g.current_participant["id"])
+        if not questionnaire_session or questionnaire_session["status"] != "completed":
+            questionnaire_session = ensure_questionnaire_session(g.current_participant)
+            return redirect(url_for("questionnaire", session_id=questionnaire_session["id"]))
         return render_template("participant_dashboard.html", csrf_token=csrf_token())
 
     @app.get("/revelations/<int:revelation_id>")
@@ -1607,7 +1645,29 @@ def register_routes(app: Flask) -> None:
         return render_template(
             "questionnaire.html", session_id=session_id, current_participant=participant_payload(participant),
             review_mode=review_mode,
+            onboarding_required=not review_mode and not all((
+                participant["profile_tagline"], participant["height_cm"], participant["weight_kg"],
+            )),
         )
+
+    @app.put("/api/onboarding/profile")
+    @participant_required
+    def save_onboarding_profile():
+        data = json_body()
+        tagline = str(data.get("profileTagline", "")).strip()
+        try:
+            height, weight = int(data.get("heightCm")), float(data.get("weightKg"))
+        except (TypeError, ValueError):
+            abort_json(400, "Complète ta taille et ton poids.")
+        if not tagline or len(tagline) > 120 or not 100 <= height <= 250 or not 30 <= weight <= 250:
+            abort_json(400, "Complète correctement ta fiche.")
+        _db().execute(
+            "UPDATE participants SET profile_tagline=?,height_cm=?,weight_kg=?,updated_at=? WHERE id=?",
+            (tagline, height, round(weight, 1), utcnow(), g.current_participant["id"]),
+        )
+        _db().commit()
+        row = _db().execute("SELECT * FROM participants WHERE id=?", (g.current_participant["id"],)).fetchone()
+        return jsonify(participant_payload(row, private=True))
 
     @app.get("/merci")
     def merci():

@@ -21,7 +21,7 @@
 {% endblock %}
 
 {% block content %}
-<section class="questionnaire" data-questionnaire data-session-id="{{ session_id }}" data-review-mode="{{ 'true' if review_mode else 'false' }}">
+<section class="questionnaire" data-questionnaire data-session-id="{{ session_id }}" data-review-mode="{{ 'true' if review_mode else 'false' }}" data-onboarding-required="{{ 'true' if onboarding_required else 'false' }}">
   <header class="questionnaire-head">
     <div>
       <p class="eyebrow">{% if review_mode %}Tes réponses{% else %}Questionnaire{% endif %}</p>
