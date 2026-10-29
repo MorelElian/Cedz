@@ -823,6 +823,29 @@ def test_participant_can_complete_public_peloton_profile(client):
     assert public_profile["weightKg"] == 72.5
 
 
+def test_peloton_uses_latest_sent_revelations_and_only_shows_popular_when_interacted(client, app):
+    csrf = admin_login(client)
+    people = client.get("/api/admin/participants", headers=csrf).get_json()["participants"]
+    barbs = next(person for person in people if person["displayName"] == "Barbs")
+    author = next(person for person in people if person["id"] != barbs["id"])
+    set_password(client, csrf, barbs["id"])
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        rows = db.execute("SELECT id FROM revelations WHERE recipient_participant_id=? LIMIT 6", (barbs["id"],)).fetchall()
+        assert len(rows) == 6
+        for index, (revelation_id,) in enumerate(rows):
+            db.execute("UPDATE revelations SET status='sent',sent_at=? WHERE id=?", (f"2026-10-1{index}T12:00:00+00:00", revelation_id))
+        popular_id = rows[0][0]
+        db.execute("INSERT INTO social_comments(revelation_id,author_participant_id,body,created_at,updated_at) VALUES (?,?,?,?,?)", (popular_id, author["id"], "Bien vu.", "now", "now"))
+        db.execute("INSERT INTO social_reactions(target_type,target_id,author_participant_id,kind,custom_label,created_at,updated_at) VALUES ('revelation',?,?, 'custom','validé','now','now')", (popular_id, author["id"]))
+        db.commit()
+    participant_login(client, "Barbs")
+    payload = client.get(f"/api/peloton/{barbs['id']}").get_json()
+    assert len(payload["latestRevelations"]) == 5
+    assert payload["popularRevelations"][0]["id"] == popular_id
+    reaction = payload["popularRevelations"][0]["reactionGroups"][0]
+    assert reaction["label"] == "validé" and reaction["count"] == 1
+
+
 def test_admin_peloton_revelation_list_uses_generated_content_when_not_edited(client, app):
     csrf = admin_login(client)
     participant = client.get("/api/admin/participants", headers=csrf).get_json()["participants"][0]

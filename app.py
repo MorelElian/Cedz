@@ -2642,14 +2642,28 @@ def register_account_api(app: Flask) -> None:
     def peloton_person(person_id: int) -> dict[str, Any]:
         db = _db(); person = db.execute("SELECT * FROM participants WHERE id=? AND is_active=1", (person_id,)).fetchone()
         if not person: abort_json(404, "Participant introuvable.")
-        featured = db.execute(revelation_query(" WHERE r.recipient_participant_id=? AND r.status='sent' AND r.id IN (SELECT revelation_id FROM peloton_featured_revelations WHERE profile_participant_id=?) ORDER BY (SELECT position FROM peloton_featured_revelations WHERE revelation_id=r.id AND profile_participant_id=?)"), (person_id, person_id, person_id)).fetchall()
+        sent_rows = db.execute(revelation_query(" WHERE r.recipient_participant_id=? AND r.status='sent' ORDER BY r.sent_at DESC,r.id DESC"), (person_id,)).fetchall()
         def reactions(target_type: str, target_id: int):
-            return [dict(id=row["id"], kind=row["kind"], customLabel=row["custom_label"], author={"id":row["author_id"],"displayName":row["author_name"]}) for row in db.execute("SELECT sr.*,p.id author_id,p.display_name author_name FROM social_reactions sr JOIN participants p ON p.id=sr.author_participant_id WHERE target_type=? AND target_id=? ORDER BY sr.created_at", (target_type,target_id))]
+            raw = [dict(id=row["id"], kind=row["kind"], customLabel=row["custom_label"], author={"id":row["author_id"],"displayName":row["author_name"]}) for row in db.execute("SELECT sr.*,p.id author_id,p.display_name author_name FROM social_reactions sr JOIN participants p ON p.id=sr.author_participant_id WHERE target_type=? AND target_id=? ORDER BY sr.created_at", (target_type,target_id))]
+            groups: dict[str, dict[str, Any]] = {}
+            for item in raw:
+                label = item["customLabel"] or ("J’aime" if item["kind"] == "agree" else "N’importe quoi" if item["kind"] == "disagree" else item["kind"])
+                group = groups.setdefault(label.casefold(), {"label": label, "count": 0, "authors": [], "reacted": False})
+                group["count"] += 1
+                group["authors"].append(item["author"])
+                group["reacted"] = group["reacted"] or item["author"]["id"] == g.current_participant["id"]
+            return raw, list(groups.values())
         cards=[]
-        for row in featured:
-            item=revelation_payload(row); item["reactions"]=reactions("revelation",row["id"])
+        for row in sent_rows:
+            item=revelation_payload(row); item["reactions"], item["reactionGroups"] = reactions("revelation",row["id"])
             item["comments"]=[dict(id=c["id"],body=c["body"],createdAt=c["created_at"],author={"id":c["author_id"],"displayName":c["author_name"]}) for c in db.execute("SELECT c.*,p.id author_id,p.display_name author_name FROM social_comments c JOIN participants p ON p.id=c.author_participant_id WHERE c.revelation_id=? ORDER BY c.created_at DESC",(row["id"],))]
             cards.append(item)
+        latest_cards = cards[:5]
+        popular_cards = sorted(
+            [item for item in cards if item["comments"] or item["reactionGroups"]],
+            key=lambda item: (len(item["comments"]) + sum(group["count"] for group in item["reactionGroups"]), item["sentAt"] or ""),
+            reverse=True,
+        )[:5]
         wall=[dict(id=w["id"],body=w["body"],createdAt=w["created_at"],author={"id":w["author_id"],"displayName":w["author_name"]}) for w in db.execute("SELECT w.*,p.id author_id,p.display_name author_name FROM profile_wall_posts w JOIN participants p ON p.id=w.author_participant_id WHERE w.profile_participant_id=? ORDER BY w.created_at DESC",(person_id,))]
         ranks=[]
         discipline_keys = {"swim": "nage", "bike": "vélo", "run": "course"}
@@ -2665,7 +2679,7 @@ def register_account_api(app: Flask) -> None:
                 ordered=raw.get("orderedParticipantIds",raw.get("ordered_participant_ids",[])) if isinstance(raw,dict) else []
                 if person_id in ordered: votes.append({"answerId":answer["id"],"author":answer["author_name"],"position":ordered.index(person_id)+1,"reactions":reactions("ranking_answer",answer["id"])})
             ranks.append({"discipline":discipline,"averagePosition":round(sum(values)/len(values),2) if values else None,"revealedCount":len(values),"votes":votes})
-        return {"participant":participant_payload(person),"rankings":ranks,"featuredRevelations":cards,"wallPosts":wall}
+        return {"participant":participant_payload(person),"rankings":ranks,"latestRevelations":latest_cards,"popularRevelations":popular_cards,"wallPosts":wall}
 
     @app.get("/api/peloton")
     @participant_required
@@ -2688,7 +2702,7 @@ def register_account_api(app: Flask) -> None:
     @participant_required
     def peloton_comment(revelation_id: int):
         body=str(json_body().get("body","")).strip(); row=_db().execute("SELECT recipient_participant_id FROM revelations WHERE id=? AND status='sent'",(revelation_id,)).fetchone()
-        if not row or not _db().execute("SELECT 1 FROM peloton_featured_revelations WHERE revelation_id=?",(revelation_id,)).fetchone(): abort_json(404,"Révélation introuvable.")
+        if not row: abort_json(404,"Révélation introuvable.")
         if not body or len(body)>800: abort_json(400,"Commentaire invalide.")
         now=utcnow();_db().execute("INSERT INTO social_comments(revelation_id,author_participant_id,body,created_at,updated_at) VALUES(?,?,?,?,?)",(revelation_id,g.current_participant["id"],body,now,now));_db().commit();return jsonify(peloton_person(row["recipient_participant_id"])),201
 
@@ -2699,7 +2713,7 @@ def register_account_api(app: Flask) -> None:
         if target_type not in {"revelation","ranking_answer"} or not isinstance(target_id,int) or kind not in {"agree","disagree","custom"} or (kind=="custom" and (not label or len(label)>40)): abort_json(400,"Réaction invalide.")
         if target_type=="revelation":
             row=_db().execute("SELECT recipient_participant_id FROM revelations WHERE id=? AND status='sent'",(target_id,)).fetchone()
-            if not row or not _db().execute("SELECT 1 FROM peloton_featured_revelations WHERE revelation_id=?",(target_id,)).fetchone(): abort_json(404,"Révélation introuvable.")
+            if not row: abort_json(404,"Révélation introuvable.")
             profile_id=row["recipient_participant_id"]
         else:
             row=_db().execute("SELECT target_participant_id FROM imported_answers WHERE id=? AND question_type='ranking' AND is_active=1",(target_id,)).fetchone()
