@@ -2284,6 +2284,16 @@ def revelation_payload(row: sqlite3.Row, *, admin: bool = False) -> dict[str, An
     return result
 
 
+def revelation_inventory_payload(row: sqlite3.Row) -> dict[str, Any]:
+    payload = revelation_payload(row, admin=True)
+    payload.update(
+        answerSummary=revelation_answer_summary(row) or payload["finalContent"],
+        createdAt=row["created_at"],
+        updatedAt=row["updated_at"],
+    )
+    return payload
+
+
 def revelation_query(where: str = "") -> str:
     return """SELECT r.*, recipient.email recipient_email, recipient.display_name recipient_name,
               recipient.profile_photo_url recipient_photo, author.display_name author_name,
@@ -3241,6 +3251,47 @@ def register_admin_api(app: Flask) -> None:
     def admin_revelations_sent():
         rows = _db().execute(revelation_query(" WHERE r.status='sent' ORDER BY r.sent_at DESC")).fetchall()
         return jsonify({"revelations": [revelation_payload(row, admin=True) for row in rows]})
+
+    @app.get("/api/admin/revelation-inventory")
+    @admin_required
+    def admin_revelation_inventory():
+        rows = _db().execute(
+            """SELECT p.id,p.display_name,p.profile_photo_url,
+                      SUM(CASE WHEN r.status='sent' THEN 1 ELSE 0 END) sent_count,
+                      SUM(CASE WHEN r.status='in_review' THEN 1 ELSE 0 END) ready_count,
+                      SUM(CASE WHEN r.status='candidate' THEN 1 ELSE 0 END) remaining_count
+                 FROM participants p LEFT JOIN revelations r ON r.recipient_participant_id=p.id
+                WHERE p.is_active=1
+                GROUP BY p.id ORDER BY p.display_name"""
+        ).fetchall()
+        return jsonify({"participants": [{
+            "id": row["id"], "displayName": row["display_name"], "profilePhotoUrl": row["profile_photo_url"],
+            "sentCount": row["sent_count"], "readyCount": row["ready_count"], "remainingCount": row["remaining_count"],
+        } for row in rows]})
+
+    @app.get("/api/admin/revelation-inventory/<int:participant_id>")
+    @admin_required
+    def admin_revelation_inventory_person(participant_id: int):
+        participant = _db().execute(
+            "SELECT id,display_name,profile_photo_url FROM participants WHERE id=? AND is_active=1", (participant_id,)
+        ).fetchone()
+        if not participant:
+            abort_json(404, "Participant introuvable.")
+        sent = _db().execute(
+            revelation_query(" WHERE r.recipient_participant_id=? AND r.status='sent' ORDER BY r.sent_at DESC, r.id DESC"),
+            (participant_id,),
+        ).fetchall()
+        remaining = _db().execute(
+            revelation_query(""" WHERE r.recipient_participant_id=? AND r.status IN ('in_review','candidate')
+                                ORDER BY CASE r.status WHEN 'in_review' THEN 0 ELSE 1 END, r.created_at DESC, r.id DESC"""),
+            (participant_id,),
+        ).fetchall()
+        return jsonify({
+            "participant": {"id": participant["id"], "displayName": participant["display_name"],
+                            "profilePhotoUrl": participant["profile_photo_url"]},
+            "sent": [revelation_inventory_payload(row) for row in sent],
+            "remaining": [revelation_inventory_payload(row) for row in remaining],
+        })
 
     @app.get("/api/admin/revelation-replies")
     @admin_required

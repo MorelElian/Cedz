@@ -613,6 +613,34 @@ def test_dashboard_adds_global_average_across_revealed_ranking_disciplines(clien
     assert peloton_counts == {"global": 3, "swim": 1, "bike": 1, "run": 1}
 
 
+def test_admin_revelation_inventory_separates_sent_and_remaining(client, app):
+    csrf = admin_login(client)
+    participant = client.get("/api/admin/participants", headers=csrf).get_json()["participants"][0]
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        rows = db.execute(
+            "SELECT id FROM revelations WHERE recipient_participant_id=? ORDER BY id LIMIT 3",
+            (participant["id"],),
+        ).fetchall()
+        assert len(rows) == 3
+        db.execute("UPDATE revelations SET status='sent',sent_at='2026-10-10T12:00:00+00:00' WHERE id=?", (rows[0][0],))
+        db.execute("UPDATE revelations SET status='sent',sent_at='2026-10-11T12:00:00+00:00' WHERE id=?", (rows[1][0],))
+        db.execute("UPDATE revelations SET status='in_review' WHERE id=?", (rows[2][0],))
+        db.commit()
+
+    summary = client.get("/api/admin/revelation-inventory", headers=csrf)
+    assert summary.status_code == 200
+    item = next(row for row in summary.get_json()["participants"] if row["id"] == participant["id"])
+    assert item["sentCount"] >= 2
+    assert item["readyCount"] >= 1
+
+    detail = client.get(f"/api/admin/revelation-inventory/{participant['id']}", headers=csrf)
+    assert detail.status_code == 200
+    payload = detail.get_json()
+    assert [row["id"] for row in payload["sent"][:2]] == [rows[1][0], rows[0][0]]
+    assert rows[2][0] in {row["id"] for row in payload["remaining"]}
+    assert all(row["answerSummary"] for row in payload["sent"] + payload["remaining"])
+
+
 def test_completed_participant_can_review_and_update_answers(client, app):
     csrf = admin_login(client)
     participant = next(
