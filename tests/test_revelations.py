@@ -276,7 +276,13 @@ def test_daily_question_mail_cycle_keeps_previous_questions_and_never_duplicates
     assert any(item[0] == "barbs@example.fr" and item[1] != "Barbs - Question" for item in deliveries)
     assert "Question bonus" in deliveries[0][2]
     assert "Réponds à la question" in deliveries[0][2]
-    assert any(participant_id == barbs["id"] and payload["title"].startswith("Barbs, ") for participant_id, payload in pushes)
+    barbs_push = next(payload for participant_id, payload in pushes if participant_id == barbs["id"])
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        question_body = db.execute(
+            "SELECT rendered_body FROM daily_questions WHERE participant_id=? AND status='active'", (barbs["id"],)
+        ).fetchone()[0]
+    assert barbs_push["title"] == question_body
+    assert barbs_push["body"] == "Clique pour y répondre"
     assert again["rotated"] is False
     assert len(deliveries) == len(first["sent"])
 
@@ -898,6 +904,7 @@ def test_review_has_one_card_per_participant_and_refreshes_explicitly(client):
 
 def test_send_calls_configured_delivery_then_is_idempotent_and_private(client, app, monkeypatch):
     deliveries = []
+    pushes = []
 
     def fake_delivery(recipient, subject, html_body):
         deliveries.append((recipient, subject, html_body))
@@ -906,6 +913,7 @@ def test_send_calls_configured_delivery_then_is_idempotent_and_private(client, a
     app.config["MAIL_MODE"] = "gmail"
     app.config["PUBLIC_BASE_URL"] = "https://cedz.example"
     monkeypatch.setattr("app.deliver_email", fake_delivery)
+    monkeypatch.setattr("app.send_push_notification", lambda participant_id, **payload: pushes.append((participant_id, payload)))
     csrf = admin_login(client)
     people = client.get("/api/admin/participants").get_json()["participants"]
     cards = client.get("/api/admin/revelations/review").get_json()["revelations"]
@@ -930,6 +938,11 @@ def test_send_calls_configured_delivery_then_is_idempotent_and_private(client, a
     assert sent.status_code == 200
     assert sent.get_json()["deliveryMode"] == "gmail"
     assert len(deliveries) == 1 and deliveries[0][0] == "recipient@example.fr"
+    assert pushes == [(
+        recipient["id"],
+        {"title": f"On a posé une question à {author['displayName']}", "body": card["question"],
+         "url": f"https://cedz.example/revelations/{card['id']}"},
+    )]
     snapshot = sent.get_json()["htmlSnapshot"]
     assert "<script>" not in snapshot
     assert "&lt;script&gt;" not in snapshot

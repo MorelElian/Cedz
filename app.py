@@ -2235,8 +2235,8 @@ def run_daily_question_mailer(*, promote_prepared: bool = False) -> dict[str, An
         account_path = url_for("account_page")
         send_push_notification(
             person["id"],
-            title=subject,
-            body="Une question bonus t’attend.",
+            title=str(question["rendered_body"]),
+            body="Clique pour y répondre",
             url=public_base + account_path if public_base else url_for("account_page", _external=True),
         )
         result["sent"].append({"participant": person["display_name"], "recipientEmail": recipient, "deliveryMode": mode})
@@ -2354,10 +2354,11 @@ def deliver_revelation(row: sqlite3.Row) -> dict[str, Any]:
     db.commit()
     public_base = str(current_app.config.get("PUBLIC_BASE_URL", "")).rstrip("/")
     detail_path = url_for("revelation_detail_page", revelation_id=row["id"])
+    question = json.loads(row["content_json"])["question"]
     send_push_notification(
         row["recipient_participant_id"],
-        title="Une révélation t’attend.",
-        body="Ouvre Cedz pour la découvrir.",
+        title=f"On a posé une question à {row['author_name']}",
+        body=question,
         url=public_base + detail_path if public_base else url_for("revelation_detail_page", revelation_id=row["id"], _external=True),
     )
     sent = db.execute(revelation_query(" WHERE r.id=?"), (row["id"],)).fetchone()
