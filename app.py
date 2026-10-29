@@ -494,6 +494,15 @@ def init_db() -> None:
     imported_columns = {row["name"] for row in _db().execute("PRAGMA table_info(imported_answers)")}
     if "source_session_id" not in imported_columns:
         _db().execute("ALTER TABLE imported_answers ADD COLUMN source_session_id TEXT")
+    _db().execute(
+        """UPDATE imported_answers
+           SET source_created_at=COALESCE(
+               (SELECT answered_at FROM daily_questions
+                WHERE daily_questions.imported_answer_id=imported_answers.id),
+               imported_at
+           )
+           WHERE source_key LIKE 'daily:%' AND source_created_at IS NULL"""
+    )
     _db().commit()
 
 
@@ -2687,11 +2696,11 @@ def register_account_api(app: Flask) -> None:
         now = utcnow()
         cursor = db.execute(
             """INSERT INTO imported_answers(source_key,author_participant_id,target_participant_id,question_id,question_title,
-               rendered_question,question_type,answer_text,answer_number,answer_json,is_active,imported_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,?)""",
+               rendered_question,question_type,answer_text,answer_number,answer_json,is_active,source_created_at,imported_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (f"daily:{daily_id}", g.current_participant["id"], targets[0] if targets else None, row["question_id"],
              row["title"], row["rendered_body"], row["type"], text, number,
-             json.dumps(structured, ensure_ascii=False) if structured is not None else None, 1, now, now),
+             json.dumps(structured, ensure_ascii=False) if structured is not None else None, 1, now, now, now),
         )
         available_after = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(timespec="seconds")
         db.execute("UPDATE daily_questions SET status='answered',imported_answer_id=?,answered_at=?,available_after=?,updated_at=? WHERE id=?",
