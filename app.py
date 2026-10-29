@@ -3286,11 +3286,44 @@ def register_admin_api(app: Flask) -> None:
                                 ORDER BY CASE r.status WHEN 'in_review' THEN 0 ELSE 1 END, r.created_at DESC, r.id DESC"""),
             (participant_id,),
         ).fetchall()
+        ranking_rows = _db().execute(
+            revelation_query(""" WHERE r.recipient_participant_id=? AND r.question_type='ranking'
+                                ORDER BY r.id"""),
+            (participant_id,),
+        ).fetchall()
+        ranking_labels = ("nage", "vélo", "course")
+        rankings = {
+            discipline: {
+                "discipline": discipline,
+                "totalCount": 0,
+                "revealedCount": 0,
+                "readyCount": 0,
+                "remainingCount": 0,
+                "rejectedCount": 0,
+            }
+            for discipline in ranking_labels
+        }
+        for row in ranking_rows:
+            content = json.loads(row["content_json"])
+            discipline = str(content.get("discipline", "")).casefold()
+            if discipline not in rankings:
+                continue
+            item = rankings[discipline]
+            item["totalCount"] += 1
+            if row["status"] == "sent":
+                item["revealedCount"] += 1
+            elif row["status"] == "in_review":
+                item["readyCount"] += 1
+            elif row["status"] in {"candidate", "skipped"}:
+                item["remainingCount"] += 1
+            elif row["status"] == "rejected":
+                item["rejectedCount"] += 1
         return jsonify({
             "participant": {"id": participant["id"], "displayName": participant["display_name"],
                             "profilePhotoUrl": participant["profile_photo_url"]},
             "sent": [revelation_inventory_payload(row) for row in sent],
             "remaining": [revelation_inventory_payload(row) for row in remaining],
+            "rankings": list(rankings.values()),
         })
 
     @app.get("/api/admin/revelation-replies")

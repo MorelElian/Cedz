@@ -3,6 +3,7 @@ import io
 import json
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -639,6 +640,41 @@ def test_admin_revelation_inventory_separates_sent_and_remaining(client, app):
     assert [row["id"] for row in payload["sent"][:2]] == [rows[1][0], rows[0][0]]
     assert rows[2][0] in {row["id"] for row in payload["remaining"]}
     assert all(row["answerSummary"] for row in payload["sent"] + payload["remaining"])
+
+
+def test_admin_revelation_inventory_reports_each_ranking_discipline(client, app):
+    csrf = admin_login(client)
+    participant = client.get("/api/admin/participants", headers=csrf).get_json()["participants"][0]
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        ranking_rows = db.execute(
+            """SELECT id,content_json FROM revelations
+               WHERE recipient_participant_id=? AND question_type='ranking'""",
+            (participant["id"],),
+        ).fetchall()
+        by_discipline = {
+            json.loads(content_json)["discipline"]: row_id
+            for row_id, content_json in ranking_rows
+        }
+        assert {"nage", "vélo", "course"} <= set(by_discipline)
+        db.execute("UPDATE revelations SET status='sent',sent_at='2026-10-12T12:00:00+00:00' WHERE id=?", (by_discipline["nage"],))
+        db.execute("UPDATE revelations SET status='in_review' WHERE id=?", (by_discipline["vélo"],))
+        db.execute("UPDATE revelations SET status='rejected' WHERE id=?", (by_discipline["course"],))
+        db.commit()
+
+    detail = client.get(f"/api/admin/revelation-inventory/{participant['id']}", headers=csrf)
+    assert detail.status_code == 200
+    rankings = {row["discipline"]: row for row in detail.get_json()["rankings"]}
+    assert rankings["nage"]["revealedCount"] >= 1
+    assert rankings["vélo"]["readyCount"] >= 1
+    assert rankings["course"]["rejectedCount"] >= 1
+    assert all(row["totalCount"] >= 1 for row in rankings.values())
+
+
+def test_admin_inventory_renders_the_three_ranking_discipline_statuses(app):
+    script = Path(app.root_path, "static", "js", "admin_inventory.js").read_text(encoding="utf-8")
+    assert "Classements" in script
+    assert "ranking-summary" in script
+    assert "revealedCount" in script
 
 
 def test_completed_participant_can_review_and_update_answers(client, app):

@@ -31,10 +31,23 @@
     return `<article class="inventory-card ${sent ? 'is-sent' : `is-${esc(item.status)}`} "><header><span class="badge ${sent ? 'badge-active' : 'badge-inactive'}">${label}</span><time>${esc(date(timestamp))}</time></header><p class="inventory-question">${esc(item.question)}</p><p class="inventory-author">Réponse de <strong>${esc(item.authorName)}</strong></p><blockquote>${esc(content || 'Réponse indisponible.')}</blockquote></article>`;
   }
 
+  function rankingSummary(rankings) {
+    const labels = {nage: 'Nage', vélo: 'Vélo', course: 'Course'};
+    const items = rankings || [];
+    return `<section class="inventory-rankings"><header class="inventory-column-head"><div><p class="eyebrow">Les trois disciplines</p><h3>Classements</h3></div></header><div class="ranking-summary">${items.map(item => {
+      const details = [];
+      if (item.revealedCount) details.push(`${item.revealedCount} révélée${item.revealedCount > 1 ? 's' : ''}`);
+      if (item.readyCount) details.push(`${item.readyCount} prête${item.readyCount > 1 ? 's' : ''}`);
+      if (item.remainingCount) details.push(`${item.remainingCount} restante${item.remainingCount > 1 ? 's' : ''}`);
+      if (item.rejectedCount) details.push(`${item.rejectedCount} écartée${item.rejectedCount > 1 ? 's' : ''}`);
+      return `<article class="ranking-summary-row"><strong>${labels[item.discipline] || esc(item.discipline)}</strong><span class="badge ${item.revealedCount ? 'badge-active' : 'badge-inactive'}">${item.revealedCount ? 'Révélé' : 'Pas encore révélé'}</span><p>${details.join(' · ') || 'Aucun classement disponible'}</p></article>`;
+    }).join('')}</div></section>`;
+  }
+
   function renderDetail(data) {
     const sent = data.sent || [];
     const remaining = data.remaining || [];
-    detailRoot.innerHTML = `<header class="inventory-head"><span class="mini-avatar">${avatar(data.participant)}</span><div><p class="eyebrow">Dossier individuel</p><h2>${esc(data.participant.displayName)}</h2></div><div class="inventory-totals"><span><b>${sent.length}</b> envoyées</span><span><b>${remaining.filter(item => item.status === 'in_review').length}</b> prêtes</span><span><b>${remaining.filter(item => item.status === 'candidate').length}</b> restantes</span></div></header><div class="inventory-columns"><section><header class="inventory-column-head"><h3>Déjà révélées</h3><span>${sent.length}</span></header><div class="inventory-card-list">${sent.map(item => card(item, true)).join('') || '<p class="inventory-empty">Aucune révélation envoyée pour le moment.</p>'}</div></section><section><header class="inventory-column-head"><h3>À révéler</h3><span>${remaining.length}</span></header><div class="inventory-card-list">${remaining.map(item => card(item, false)).join('') || '<p class="inventory-empty">Le pool est vide.</p>'}</div></section></div>`;
+    detailRoot.innerHTML = `<header class="inventory-head"><span class="mini-avatar">${avatar(data.participant)}</span><div><p class="eyebrow">Dossier individuel</p><h2>${esc(data.participant.displayName)}</h2></div><div class="inventory-totals"><span><b>${sent.length}</b> envoyées</span><span><b>${remaining.filter(item => item.status === 'in_review').length}</b> prêtes</span><span><b>${remaining.filter(item => item.status === 'candidate').length}</b> restantes</span></div></header><div class="inventory-columns"><section><header class="inventory-column-head"><h3>Déjà révélées</h3><span>${sent.length}</span></header><div class="inventory-card-list">${sent.map(item => card(item, true)).join('') || '<p class="inventory-empty">Aucune révélation envoyée pour le moment.</p>'}</div></section><section><header class="inventory-column-head"><h3>À révéler</h3><span>${remaining.length}</span></header><div class="inventory-card-list">${remaining.map(item => card(item, false)).join('') || '<p class="inventory-empty">Le pool est vide.</p>'}</div></section></div>${rankingSummary(data.rankings)}`;
   }
 
   async function loadPerson(id) {
