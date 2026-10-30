@@ -2719,7 +2719,18 @@ def register_account_api(app: Flask) -> None:
             row=_db().execute("SELECT target_participant_id FROM imported_answers WHERE id=? AND question_type='ranking' AND is_active=1",(target_id,)).fetchone()
             if not row or not row["target_participant_id"]: abort_json(404,"Vote introuvable.")
             profile_id=row["target_participant_id"]
-        now=utcnow();_db().execute("INSERT INTO social_reactions(target_type,target_id,author_participant_id,kind,custom_label,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(target_type,target_id,author_participant_id) DO UPDATE SET kind=excluded.kind,custom_label=excluded.custom_label,updated_at=excluded.updated_at",(target_type,target_id,g.current_participant["id"],kind,label if kind=="custom" else None,now,now));_db().commit();return jsonify(peloton_person(profile_id))
+        now=utcnow();_db().execute("INSERT INTO social_reactions(target_type,target_id,author_participant_id,kind,custom_label,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(target_type,target_id,author_participant_id) DO UPDATE SET kind=excluded.kind,custom_label=excluded.custom_label,updated_at=excluded.updated_at",(target_type,target_id,g.current_participant["id"],kind,label if kind=="custom" else None,now,now));_db().commit()
+        if target_type == "revelation" and profile_id != g.current_participant["id"]:
+            public_base = str(current_app.config.get("PUBLIC_BASE_URL", "")).rstrip("/")
+            account_path = url_for("account_page") + "#peloton"
+            reaction_label = label if kind == "custom" else "👍 Mérité" if kind == "agree" else "😬 C’est grave"
+            send_push_notification(
+                profile_id,
+                title=f"{g.current_participant['display_name']} a réagi à ton avis",
+                body=reaction_label,
+                url=public_base + account_path if public_base else url_for("account_page", _external=True) + "#peloton",
+            )
+        return jsonify(peloton_person(profile_id))
 
     @app.delete("/api/peloton/wall-posts/<int:post_id>")
     @participant_required
@@ -2864,6 +2875,15 @@ def register_account_api(app: Flask) -> None:
                 notification_sent = True
             except MailDeliveryError:
                 current_app.logger.warning("Reply notification delivery failed for revelation %s", revelation_id)
+        if revelation["author_participant_id"] != participant["id"]:
+            public_base = str(current_app.config.get("PUBLIC_BASE_URL", "")).rstrip("/")
+            account_path = url_for("account_page") + "#dossiers"
+            send_push_notification(
+                revelation["author_participant_id"],
+                title=f"{participant['display_name']} t’a répondu",
+                body=json.loads(revelation["content_json"])["question"],
+                url=public_base + account_path if public_base else url_for("account_page", _external=True) + "#dossiers",
+            )
         return jsonify({"created": True, "notificationSent": notification_sent,
                         "reply": {"message": message, "createdAt": utcnow()}}), 201
 

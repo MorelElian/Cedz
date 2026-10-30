@@ -852,6 +852,40 @@ def test_peloton_reaction_controls_use_compact_long_press_people_popover(app):
     assert "😬 C’est grave" in script
     assert "reaction-popover" in script
     assert "pointerdown" in script
+    assert "<strong>${group.count}</strong>" in script
+    assert "reaction-count" not in script
+
+
+def test_reacting_to_a_revelation_notifies_its_profile_owner(client, app, monkeypatch):
+    pushes = []
+    monkeypatch.setattr("app.send_push_notification", lambda participant_id, **payload: pushes.append((participant_id, payload)))
+    csrf = admin_login(client)
+    people = client.get("/api/admin/participants", headers=csrf).get_json()["participants"]
+    owner, reactor = people[:2]
+    set_password(client, csrf, owner["id"])
+    set_password(client, csrf, reactor["id"])
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        revelation_id = db.execute(
+            "SELECT id FROM revelations WHERE recipient_participant_id=? ORDER BY id LIMIT 1", (owner["id"],)
+        ).fetchone()[0]
+        db.execute("UPDATE revelations SET status='sent', sent_at='2026-10-30T12:00:00+00:00' WHERE id=?", (revelation_id,))
+        db.commit()
+
+    participant_login(client, reactor["displayName"])
+    response = client.put(
+        "/api/peloton/reactions",
+        json={"targetType": "revelation", "targetId": revelation_id, "kind": "agree"},
+    )
+
+    assert response.status_code == 200
+    assert pushes == [(
+        owner["id"],
+        {
+            "title": f"{reactor['displayName']} a réagi à ton avis",
+            "body": "👍 Mérité",
+            "url": "http://localhost/mon-compte#peloton",
+        },
+    )]
 
 
 def test_admin_peloton_revelation_list_uses_generated_content_when_not_edited(client, app):
@@ -1057,6 +1091,14 @@ def test_send_calls_configured_delivery_then_is_idempotent_and_private(client, a
     assert reply.status_code == 201
     assert reply.get_json()["notificationSent"] is True
     assert len(deliveries) == 2
+    assert pushes[-1] == (
+        author["id"],
+        {
+            "title": f"{recipient['displayName']} t’a répondu",
+            "body": card["question"],
+            "url": "https://cedz.example/mon-compte#dossiers",
+        },
+    )
     notification = deliveries[-1]
     assert notification[0] == "author@example.fr"
     assert notification[1] == f"Cedz — {recipient['displayName']} t’a répondu"
