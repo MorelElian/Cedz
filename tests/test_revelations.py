@@ -871,6 +871,12 @@ def test_peloton_revelation_card_uses_profile_bubble_and_raw_answer_content(app)
     assert "peloton-answer-comment" in script
 
 
+def test_peloton_author_bubble_locks_avatar_to_small_size(app):
+    styles = Path(app.root_path, "static", "css", "app.css").read_text(encoding="utf-8")
+    assert ".peloton-reveal-head .peloton-author-bubble img" in styles
+    assert "max-width:24px!important" in styles
+
+
 def test_reacting_to_a_revelation_notifies_its_profile_owner(client, app, monkeypatch):
     pushes = []
     monkeypatch.setattr("app.send_push_notification", lambda participant_id, **payload: pushes.append((participant_id, payload)))
