@@ -856,6 +856,13 @@ def test_peloton_reaction_controls_use_compact_long_press_people_popover(app):
     assert "reaction-count" not in script
 
 
+def test_peloton_comments_have_their_own_readable_card_styles(app):
+    styles = Path(app.root_path, "static", "css", "app.css").read_text(encoding="utf-8")
+    assert ".peloton-comments p" in styles
+    assert ".peloton-comments p strong" in styles
+    assert ".peloton-comment-form input:focus" in styles
+
+
 def test_reacting_to_a_revelation_notifies_its_profile_owner(client, app, monkeypatch):
     pushes = []
     monkeypatch.setattr("app.send_push_notification", lambda participant_id, **payload: pushes.append((participant_id, payload)))
