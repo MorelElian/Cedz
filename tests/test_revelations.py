@@ -863,6 +863,14 @@ def test_peloton_comments_have_their_own_readable_card_styles(app):
     assert ".peloton-comment-form input:focus" in styles
 
 
+def test_peloton_revelation_card_uses_profile_bubble_and_raw_answer_content(app):
+    script = Path(app.root_path, "static", "js", "peloton.js").read_text(encoding="utf-8")
+    assert "r.author.profilePhotoUrl" in script
+    assert "peloton-author-bubble" in script
+    assert "c.answer??r.finalContent" in script
+    assert "peloton-answer-comment" in script
+
+
 def test_reacting_to_a_revelation_notifies_its_profile_owner(client, app, monkeypatch):
     pushes = []
     monkeypatch.setattr("app.send_push_notification", lambda participant_id, **payload: pushes.append((participant_id, payload)))
