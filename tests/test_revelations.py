@@ -868,7 +868,15 @@ def test_peloton_revelation_card_uses_author_name_and_raw_answer_content(app):
     assert "a donné son avis" in script
     assert "peloton-author-bubble" not in script
     assert "c.answer??r.finalContent" in script
-    assert "peloton-answer-comment" in script
+    assert "peloton-choice-summary" in script
+
+
+def test_peloton_choice_revelations_prioritize_comment_over_choice_summary(app):
+    script = Path(app.root_path, "static", "js", "peloton.js").read_text(encoding="utf-8")
+    styles = Path(app.root_path, "static", "css", "app.css").read_text(encoding="utf-8")
+    assert "peloton-choice-summary" in script
+    assert "<blockquote class=\"peloton-answer\">${esc(c.comment)}</blockquote>" in script
+    assert ".peloton-choice-summary" in styles
 def test_reacting_to_a_revelation_notifies_its_profile_owner(client, app, monkeypatch):
     pushes = []
     monkeypatch.setattr("app.send_push_notification", lambda participant_id, **payload: pushes.append((participant_id, payload)))
