@@ -3518,6 +3518,33 @@ def register_admin_api(app: Flask) -> None:
         replacement = select_review_candidate(row["recipient_participant_id"], exclude_id=revelation_id)
         return jsonify({"revelation": revelation_payload(replacement, admin=True) if replacement else None})
 
+    @app.post("/api/admin/revelations/<int:revelation_id>/select-next")
+    @admin_required
+    def admin_select_next_revelation(revelation_id: int):
+        db = _db()
+        row = db.execute(revelation_query(" WHERE r.id=?"), (revelation_id,)).fetchone()
+        if not row:
+            abort_json(404, "Révélation introuvable.")
+        if row["status"] != "candidate":
+            abort_json(409, "Seule une révélation disponible peut être choisie.")
+        intro = choose_intro(row)
+        now = utcnow()
+        db.execute(
+            "UPDATE revelations SET status='candidate', updated_at=? WHERE recipient_participant_id=? AND status='in_review'",
+            (now, row["recipient_participant_id"]),
+        )
+        db.execute(
+            """UPDATE revelations SET status='in_review',
+               intro_phrase_id=CASE WHEN admin_edited=1 THEN intro_phrase_id ELSE ? END,
+               intro_text=CASE WHEN admin_edited=1 THEN intro_text ELSE ? END,
+               final_content=COALESCE(final_content, ?), updated_at=? WHERE id=?""",
+            (intro["id"] if intro else None, intro["text"] if intro else "On a parlé de toi.",
+             format_revelation_content(row), now, revelation_id),
+        )
+        db.commit()
+        selected = db.execute(revelation_query(" WHERE r.id=?"), (revelation_id,)).fetchone()
+        return jsonify(revelation_payload(selected, admin=True))
+
     @app.post("/api/admin/revelations/<int:revelation_id>/send")
     @admin_required
     def admin_send_revelation(revelation_id: int):

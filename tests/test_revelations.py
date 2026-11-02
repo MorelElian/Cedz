@@ -666,6 +666,30 @@ def test_putting_a_revelation_back_later_keeps_it_available_in_inventory(client,
     assert current["id"] in {item["id"] for item in detail["remaining"]}
 
 
+def test_admin_can_choose_a_pool_revelation_as_the_next_one(client, app):
+    csrf = admin_login(client)
+    participant = client.get("/api/admin/participants", headers=csrf).get_json()["participants"][0]
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        rows = db.execute(
+            "SELECT id FROM revelations WHERE recipient_participant_id=? AND status='candidate' ORDER BY id LIMIT 2",
+            (participant["id"],),
+        ).fetchall()
+        assert len(rows) == 2
+        previous_id, selected_id = (row[0] for row in rows)
+        db.execute("UPDATE revelations SET status='in_review' WHERE id=?", (previous_id,))
+        db.commit()
+
+    response = client.post(f"/api/admin/revelations/{selected_id}/select-next", headers=csrf)
+
+    assert response.status_code == 200
+    assert response.get_json()["id"] == selected_id
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        statuses = dict(db.execute("SELECT id,status FROM revelations WHERE id IN (?,?)", (previous_id, selected_id)).fetchall())
+    assert statuses == {previous_id: "candidate", selected_id: "in_review"}
+    review = client.get("/api/admin/revelations/review", headers=csrf).get_json()["revelations"]
+    assert next(item for item in review if item["recipientId"] == participant["id"])["id"] == selected_id
+
+
 def test_database_initialization_restores_legacy_skipped_revelations(app):
     with sqlite3.connect(app.config["DATABASE"]) as db:
         row_id = db.execute("SELECT id FROM revelations WHERE status='candidate' LIMIT 1").fetchone()[0]
@@ -712,6 +736,14 @@ def test_admin_inventory_renders_the_three_ranking_discipline_statuses(app):
     assert "Classements" in script
     assert "ranking-summary" in script
     assert "revealedCount" in script
+
+
+def test_admin_inventory_offers_a_next_revelation_control(app):
+    script = Path(app.root_path, "static", "js", "admin_inventory.js").read_text(encoding="utf-8")
+    styles = Path(app.root_path, "static", "css", "app.css").read_text(encoding="utf-8")
+    assert "Choisir comme prochaine" in script
+    assert "select-next" in script
+    assert ".inventory-card footer" in styles
 
 
 def test_completed_participant_can_review_and_update_answers(client, app):

@@ -9,8 +9,8 @@
   let people = [];
   let selectedId = null;
 
-  async function api(path) {
-    const response = await fetch(path, {headers: {Accept:'application/json', 'X-CSRF-Token':csrf}});
+  async function api(path, options = {}) {
+    const response = await fetch(path, {...options, headers: {Accept:'application/json', 'X-CSRF-Token':csrf, ...(options.headers || {})}});
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw Error(payload.error || 'Chargement impossible.');
     return payload;
@@ -28,7 +28,8 @@
     const label = sent ? 'Envoyée' : item.status === 'in_review' ? 'Prête à envoyer' : 'Dans le pool';
     const timestamp = sent ? item.sentAt : item.createdAt;
     const content = sent ? item.finalContent : item.answerSummary;
-    return `<article class="inventory-card ${sent ? 'is-sent' : `is-${esc(item.status)}`} "><header><span class="badge ${sent ? 'badge-active' : 'badge-inactive'}">${label}</span><time>${esc(date(timestamp))}</time></header><p class="inventory-question">${esc(item.question)}</p><p class="inventory-author">Réponse de <strong>${esc(item.authorName)}</strong></p><blockquote>${esc(content || 'Réponse indisponible.')}</blockquote></article>`;
+    const action = !sent && item.status === 'candidate' ? `<footer><button class="button button-secondary button-small" type="button" data-select-next="${item.id}">Choisir comme prochaine</button></footer>` : '';
+    return `<article class="inventory-card ${sent ? 'is-sent' : `is-${esc(item.status)}`} "><header><span class="badge ${sent ? 'badge-active' : 'badge-inactive'}">${label}</span><time>${esc(date(timestamp))}</time></header><p class="inventory-question">${esc(item.question)}</p><p class="inventory-author">Réponse de <strong>${esc(item.authorName)}</strong></p><blockquote>${esc(content || 'Réponse indisponible.')}</blockquote>${action}</article>`;
   }
 
   function rankingSummary(rankings) {
@@ -72,6 +73,21 @@
   peopleRoot.addEventListener('click', event => {
     const button = event.target.closest('[data-inventory-person]');
     if (button) loadPerson(button.dataset.inventoryPerson);
+  });
+  detailRoot.addEventListener('click', async event => {
+    const button = event.target.closest('[data-select-next]');
+    if (!button) return;
+    button.disabled = true;
+    button.textContent = 'Choisie…';
+    try {
+      await api(`/api/admin/revelations/${button.dataset.selectNext}/select-next`, {method:'POST'});
+      await loadPerson(selectedId);
+      await load();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Choisir comme prochaine';
+      window.alert(error.message);
+    }
   });
   window.addEventListener('cedz:answers-imported', load);
   load();
