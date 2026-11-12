@@ -470,6 +470,20 @@ def test_session_gets_three_rankings_with_required_lap_time(client):
     assert answers[str(question["instanceId"])]["lap_time"] == "12 min 30"
 
 
+def test_ranking_accepts_one_optional_comment_per_participant(client):
+    _, session_id = start_session(client)
+    payload = client.get(f"/api/sessions/{session_id}/questions").get_json()
+    question = next(question for question in payload["questions"] if question["type"] == "ranking")
+    participant_ids = [participant["id"] for participant in payload["participants"]]
+    response = client.post(f"/api/sessions/{session_id}/answers", json={
+        "questionInstanceId": question["instanceId"],
+        "answer": {"orderedParticipantIds": participant_ids, "lapTime": "12 min", "participantComments": {str(participant_ids[0]): "Très solide."}},
+    })
+    assert response.status_code == 200
+    answer = client.get(f"/api/sessions/{session_id}/questions").get_json()["answersByInstance"][str(question["instanceId"])]
+    assert answer["participant_comments"] == {str(participant_ids[0]): "Très solide."}
+
+
 def test_every_binary_split_has_unique_labels_matching_its_question():
     split_titles = {question[0] for question in QUESTION_CATALOG if question[2] == "binary_split"}
     assert set(BINARY_SPLIT_LABELS) == split_titles

@@ -50,6 +50,7 @@ QUESTION_TYPES = {
     "single_person_answer",
     "compare_two",
     "compare_three",
+    "three_person_free_text",
     "choose_one",
     "ranking",
     "binary_split",
@@ -753,8 +754,10 @@ def revelation_content(row: sqlite3.Row, recipient_id: int, answer: Any) -> dict
         if recipient_id not in ordered:
             raise ValueError("Classement incomplet dans l'export.")
         position = ordered.index(recipient_id) + 1
+        comments = answer.get("participant_comments", answer.get("participantComments", {}))
         base.update(position=position, ahead=names.get(ordered[position - 2]) if position > 1 else None,
-                    discipline=row["question_title"].replace("Classement", "").strip().casefold())
+                    discipline=row["question_title"].replace("Classement", "").strip().casefold(),
+                    comment=str(comments.get(str(recipient_id), comments.get(recipient_id, ""))))
     elif row["question_type"] == "binary_split":
         first, second = answer.get("category_a", []), answer.get("category_b", [])
         labels = BINARY_SPLIT_LABELS.get(row["question_title"], ("Groupe A", "Groupe B"))
@@ -950,7 +953,7 @@ def render_question(body: str, people: list[sqlite3.Row]) -> str:
         return body
 
 
-DAILY_QUESTION_TYPES = {"free_text", "compare_two", "compare_three", "choose_one", "slider"}
+DAILY_QUESTION_TYPES = {"free_text", "compare_two", "compare_three", "three_person_free_text", "choose_one", "slider"}
 
 
 def daily_question_payload(row: sqlite3.Row) -> dict[str, Any]:
@@ -1017,13 +1020,13 @@ def current_daily_question(
         return None
     people = db.execute("SELECT id,display_name FROM participants WHERE is_active=1 AND id!=? ORDER BY id", (participant_id,)).fetchall()
     candidates = db.execute(
-        "SELECT * FROM questions WHERE is_active=1 AND type IN ('free_text','compare_two','compare_three','choose_one','slider')"
+        "SELECT * FROM questions WHERE is_active=1 AND type IN ('free_text','compare_two','compare_three','three_person_free_text','choose_one','slider')"
         + (" AND id=?" if question_id else "") + " ORDER BY id", ((question_id,) if question_id else ())
     ).fetchall()
     rng = secrets.SystemRandom()
     rng.shuffle(candidates)
     for question in candidates:
-        count = {"free_text": 1, "slider": 1, "compare_two": 2, "compare_three": 3, "choose_one": 0}[question["type"]]
+        count = {"free_text": 1, "slider": 1, "compare_two": 2, "compare_three": 3, "three_person_free_text": 3, "choose_one": 0}[question["type"]]
         if len(people) < count:
             continue
         group = rng.sample(people, count)
@@ -1876,7 +1879,7 @@ def register_routes(app: Flask) -> None:
 
 def validate_answer(instance: sqlite3.Row, answer: Any, target_ids: list[int]) -> tuple[str | None, float | None, Any]:
     question_type = instance["type"]
-    if question_type in {"free_text", "single_person_answer"}:
+    if question_type in {"free_text", "single_person_answer", "three_person_free_text"}:
         text = str(answer or "").strip()
         if not text or len(text) > 4000:
             abort_json(400, "La réponse doit contenir entre 1 et 4000 caractères.")
@@ -1914,7 +1917,16 @@ def validate_answer(instance: sqlite3.Row, answer: Any, target_ids: list[int]) -
         lap_time = str(answer.get("lapTime", answer.get("lap_time", ""))).strip()
         if not lap_time or len(lap_time) > 100:
             abort_json(400, "Le temps par tour doit contenir entre 1 et 100 caractères.")
-        return None, None, {"ordered_participant_ids": ids, "lap_time": lap_time}
+        raw_comments = answer.get("participantComments", answer.get("participant_comments", {}))
+        if not isinstance(raw_comments, dict): abort_json(400, "Commentaires de classement invalides.")
+        comments = {}
+        for participant_id, comment in raw_comments.items():
+            try: participant_id = int(participant_id)
+            except (TypeError, ValueError): abort_json(400, "Commentaires de classement invalides.")
+            comment = str(comment).strip()
+            if participant_id not in active_ids or len(comment) > 1000: abort_json(400, "Commentaire de classement invalide.")
+            if comment: comments[str(participant_id)] = comment
+        return None, None, {"ordered_participant_ids": ids, "lap_time": lap_time, "participant_comments": comments}
     if question_type == "binary_split":
         first, second = normalize_id_list(answer.get("categoryA")), normalize_id_list(answer.get("categoryB"))
         if set(first) & set(second) or set(first + second) != active_ids or len(first + second) != len(active_ids):
@@ -1954,7 +1966,8 @@ def format_revelation_content(row: sqlite3.Row) -> str:
             verdict = "Il t'a mis premier. Bravo, ne prends pas trop la confiance."
         else:
             verdict = f"Il t'a mis {content['position']}e, juste derrière {content['ahead']}. Mange-le !"
-        return f"Pour le classement {content['discipline']}, {author} a parlé : {verdict}"
+        comment = content.get("comment", "")
+        return f"Pour le classement {content['discipline']}, {author} a parlé : {verdict}" + (f" Son commentaire : {comment}" if comment else "")
     if kind == "binary_split":
         groups = " — ".join(
             f"{group['label']} : {', '.join(group['people'])}" for group in content["groups"]
@@ -2667,19 +2680,23 @@ def register_account_api(app: Flask) -> None:
         wall=[dict(id=w["id"],body=w["body"],createdAt=w["created_at"],author={"id":w["author_id"],"displayName":w["author_name"]}) for w in db.execute("SELECT w.*,p.id author_id,p.display_name author_name FROM profile_wall_posts w JOIN participants p ON p.id=w.author_participant_id WHERE w.profile_participant_id=? ORDER BY w.created_at DESC",(person_id,))]
         ranks=[]
         discipline_keys = {"swim": "nage", "bike": "vélo", "run": "course"}
+        all_ranking_rows = db.execute(revelation_query(" WHERE r.status='sent' AND r.question_type='ranking'"), ()).fetchall()
         for discipline in ("global","swim","bike","run"):
-            rows=db.execute(revelation_query(" WHERE r.recipient_participant_id=? AND r.status='sent' AND r.question_type='ranking'"),(person_id,)).fetchall(); values=[]
-            for row in rows:
+            values_by_person: dict[int, list[int]] = {}
+            for row in all_ranking_rows:
                 data=json.loads(row["content_json"])
                 if discipline == "global" or data.get("discipline") == discipline_keys.get(discipline):
-                    values.append(int(data.get("position",0)))
+                    values_by_person.setdefault(row["recipient_participant_id"], []).append(int(data.get("position",0)))
+            averages = {key: round(sum(values)/len(values),2) for key, values in values_by_person.items()}
+            average = averages.get(person_id)
+            rank = None if average is None else 1 + sum(1 for value in averages.values() if value < average)
             votes=[]
             for answer in db.execute("SELECT ia.*,p.display_name author_name FROM imported_answers ia JOIN participants p ON p.id=ia.author_participant_id WHERE ia.target_participant_id=? AND ia.question_type='ranking' AND ia.is_active=1",(person_id,)):
                 raw=json.loads(answer["answer_json"] or "{}")
                 ordered=raw.get("orderedParticipantIds",raw.get("ordered_participant_ids",[])) if isinstance(raw,dict) else []
                 if person_id in ordered: votes.append({"answerId":answer["id"],"author":answer["author_name"],"position":ordered.index(person_id)+1,"reactions":reactions("ranking_answer",answer["id"])})
-            ranks.append({"discipline":discipline,"averagePosition":round(sum(values)/len(values),2) if values else None,"revealedCount":len(values),"votes":votes})
-        return {"participant":participant_payload(person),"rankings":ranks,"latestRevelations":latest_cards,"popularRevelations":popular_cards,"wallPosts":wall}
+            ranks.append({"discipline":discipline,"rank":rank,"averagePosition":average,"revealedCount":len(values_by_person.get(person_id, [])),"votes":votes})
+        return {"participant":participant_payload(person),"rankings":ranks,"latestRevelations":latest_cards,"olderRevelations":cards[5:],"popularRevelations":popular_cards,"wallPosts":wall}
 
     @app.get("/api/peloton")
     @participant_required
@@ -2689,6 +2706,16 @@ def register_account_api(app: Flask) -> None:
     @app.get("/api/peloton/<int:participant_id>")
     @participant_required
     def peloton_profile(participant_id: int): return jsonify(peloton_person(participant_id))
+
+    @app.get("/api/peloton/<int:participant_id>/revelations")
+    @participant_required
+    def peloton_more_revelations(participant_id: int):
+        try: offset = max(0, int(request.args.get("offset", 0)))
+        except ValueError: abort_json(400, "Offset invalide.")
+        payload = peloton_person(participant_id)
+        cards = payload["latestRevelations"] + payload["olderRevelations"]
+        page = cards[offset:offset + 5]
+        return jsonify({"revelations": page, "hasMore": offset + len(page) < len(cards)})
 
     @app.post("/api/peloton/<int:participant_id>/wall-posts")
     @participant_required
@@ -2760,7 +2787,7 @@ def register_account_api(app: Flask) -> None:
     def create_question_suggestion():
         data = json_body()
         body, question_type = str(data.get("body", "")).strip(), str(data.get("type", "free_text"))
-        required = {"free_text": ("{person}",), "slider": ("{person}",), "compare_two": ("{person1}", "{person2}"), "compare_three": ("{person1}", "{person2}", "{person3}"), "choose_one": ()}
+        required = {"free_text": ("{person}",), "slider": ("{person}",), "compare_two": ("{person1}", "{person2}"), "compare_three": ("{person1}", "{person2}", "{person3}"), "three_person_free_text": ("{person1}", "{person2}", "{person3}"), "choose_one": ()}
         if not body or len(body) > 300 or question_type not in DAILY_QUESTION_TYPES:
             abort_json(400, "Suggestion invalide.")
         if any(marker not in body for marker in required[question_type]):

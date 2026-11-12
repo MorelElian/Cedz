@@ -210,7 +210,8 @@
       const name = document.createElement('strong'); name.textContent = nameOf(person);
       const actions = document.createElement('span'); actions.className = 'rank-actions';
       [['↑','Monter',-1],['↓','Descendre',1]].forEach(([symbol,label,direction]) => { const button=document.createElement('button'); button.type='button'; button.textContent=symbol; button.setAttribute('aria-label',`${label} ${nameOf(person)}`); button.addEventListener('click',()=>moveRank(item,direction)); actions.append(button); });
-      item.append(grip, name, actions); list.append(item);
+      const comment = document.createElement('input'); comment.type='text'; comment.name=`ranking_comment_${idOf(person)}`; comment.maxLength=1000; comment.placeholder='Un mot sur cette place ?'; comment.value=(saved?.participant_comments||saved?.participantComments||{})[idOf(person)] || (saved?.participant_comments||saved?.participantComments||{})[String(idOf(person))] || '';
+      item.append(grip, name, actions, comment); list.append(item);
     });
     bindRankingDrag(list);
     const field = document.createElement('label'); field.className = 'field lap-time-field';
@@ -327,7 +328,7 @@
     const form = stage.querySelector('.question-card');
     const question = questions[index];
     if (!form) return null;
-    if (question.type === 'ranking') return {answer_json:{ordered_participant_ids:[...form.querySelectorAll('.ranking-item')].map(item=>item.dataset.id),lap_time:form.elements.lap_time?.value.trim() || ''}};
+    if (question.type === 'ranking') return {answer_json:{ordered_participant_ids:[...form.querySelectorAll('.ranking-item')].map(item=>item.dataset.id),lap_time:form.elements.lap_time?.value.trim() || '',participant_comments:Object.fromEntries([...form.querySelectorAll('.ranking-item')].map(item=>[item.dataset.id,item.querySelector('input')?.value.trim()||'']).filter(([,value])=>value))}};
     if (question.type === 'binary_split') {
       const category_a=[...form.querySelectorAll('[data-category="a"] .split-person')].map(card => card.dataset.id);
       const category_b=[...form.querySelectorAll('[data-category="b"] .split-person')].map(card => card.dataset.id);
@@ -366,7 +367,7 @@
       if (question.type === 'compare_two' || question.type === 'compare_three' || question.type === 'choose_one') {
         answerValue = {selectedParticipantId: answerValue.selected_participant_id, comment: answerValue.comment};
       } else if (question.type === 'ranking') {
-        answerValue = {orderedParticipantIds: answerValue.ordered_participant_ids, lapTime: answerValue.lap_time};
+        answerValue = {orderedParticipantIds: answerValue.ordered_participant_ids, lapTime: answerValue.lap_time, participantComments: answerValue.participant_comments};
       } else if (question.type === 'binary_split') {
         answerValue = {categoryA: answerValue.category_a, categoryB: answerValue.category_b};
       }
