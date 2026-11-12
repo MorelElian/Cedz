@@ -953,14 +953,14 @@ def render_question(body: str, people: list[sqlite3.Row]) -> str:
         return body
 
 
-DAILY_QUESTION_TYPES = {"free_text", "compare_two", "compare_three", "three_person_free_text", "choose_one", "slider"}
+DAILY_QUESTION_TYPES = {"free_text", "compare_two", "compare_three", "three_person_free_text", "choose_one", "slider", "ranking"}
 
 
 def daily_question_payload(row: sqlite3.Row) -> dict[str, Any]:
     targets = [{"id": row[key], "displayName": row[f"{key}_name"]}
                for key in ("target_participant_id", "target_participant_2_id", "target_participant_3_id")
                if row[key] is not None]
-    if row["type"] == "choose_one":
+    if row["type"] in {"choose_one", "ranking"}:
         targets = [participant_payload(person) for person in _db().execute(
             "SELECT * FROM participants WHERE is_active=1 ORDER BY display_name"
         ).fetchall()]
@@ -1020,13 +1020,15 @@ def current_daily_question(
         return None
     people = db.execute("SELECT id,display_name FROM participants WHERE is_active=1 AND id!=? ORDER BY id", (participant_id,)).fetchall()
     candidates = db.execute(
-        "SELECT * FROM questions WHERE is_active=1 AND type IN ('free_text','compare_two','compare_three','three_person_free_text','choose_one','slider')"
+        "SELECT * FROM questions WHERE is_active=1 AND type IN ('free_text','compare_two','compare_three','three_person_free_text','choose_one','slider','ranking')"
         + (" AND id=?" if question_id else "") + " ORDER BY id", ((question_id,) if question_id else ())
     ).fetchall()
+    if not question_id:
+        candidates = [question for question in candidates if question["type"] != "ranking"]
     rng = secrets.SystemRandom()
     rng.shuffle(candidates)
     for question in candidates:
-        count = {"free_text": 1, "slider": 1, "compare_two": 2, "compare_three": 3, "three_person_free_text": 3, "choose_one": 0}[question["type"]]
+        count = {"free_text": 1, "slider": 1, "compare_two": 2, "compare_three": 3, "three_person_free_text": 3, "choose_one": 0, "ranking": 0}[question["type"]]
         if len(people) < count:
             continue
         group = rng.sample(people, count)
@@ -2818,7 +2820,10 @@ def register_account_api(app: Flask) -> None:
         if not row:
             abort_json(404, "Question du jour introuvable.")
         targets = [row[key] for key in ("target_participant_id", "target_participant_2_id", "target_participant_3_id") if row[key] is not None]
-        text, number, structured = validate_answer(row, json_body().get("answer"), targets)
+        answer = json_body().get("answer")
+        if row["type"] == "ranking" and isinstance(answer, dict) and not answer.get("lapTime"):
+            answer = {**answer, "lapTime": "bonus"}
+        text, number, structured = validate_answer(row, answer, targets)
         now = utcnow()
         cursor = db.execute(
             """INSERT INTO imported_answers(source_key,author_participant_id,target_participant_id,question_id,question_title,
