@@ -39,7 +39,7 @@
 
   function applyTab() {
     const tab = (location.hash || '#home').slice(1);
-    const active = ['home', 'dossiers', 'peloton', 'profile'].includes(tab) ? tab : 'home';
+    const active = ['home', 'dossiers', 'peloton', 'profile', 'team-duel'].includes(tab) ? tab : 'home';
     app.querySelectorAll('[data-account-view]').forEach(node => { node.hidden = node.dataset.accountView !== active; });
     app.querySelectorAll('[data-account-tab]').forEach(node => {
       const selected = node.dataset.accountTab === active;

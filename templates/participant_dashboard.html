@@ -56,6 +56,19 @@
       <div class="peloton-layout"><nav class="peloton-rail" aria-label="Choisir un participant" data-peloton-rail></nav><div class="peloton-fiche" data-peloton-fiche><div class="loading-row">Chargement du peloton…</div></div></div>
     </section>
 
+    <section class="account-section team-duel-section" aria-labelledby="team-duel-title" data-account-view="team-duel" data-team-duel-app hidden>
+      <div class="section-heading compact-heading"><div><p class="eyebrow">Le match du vestiaire</p><h2 id="team-duel-title">Ancien gros vs Ancien maigre</h2><p class="team-duel-intro">Trois disciplines. Deux camps. Les classements révélés font la différence.</p></div></div>
+      <div class="team-duel-faceoff" aria-label="Les deux équipes">
+        <article class="team-duel-camp team-duel-gros"><small>Équipe</small><h3>Anciens gros</h3><p data-team-duel-members="ancien_gros">Composition à venir</p></article>
+        <span class="team-duel-vs" aria-hidden="true">VS</span>
+        <article class="team-duel-camp team-duel-maigre"><small>Équipe</small><h3>Anciens maigres</h3><p data-team-duel-members="ancien_maigre">Composition à venir</p></article>
+      </div>
+      <p class="team-duel-rule">La plus petite position moyenne mène le duel. Ouvre une discipline pour voir les avis et la tendance.</p>
+      <div class="team-duel-status" role="status" aria-live="polite" data-team-duel-status>Le duel se prépare…</div>
+      <button class="button button-secondary button-small" type="button" data-team-duel-retry hidden>Réessayer</button>
+      <div class="team-duel-disciplines" data-team-duel-disciplines></div>
+    </section>
+
     <details class="password-panel" data-account-view="profile">
       <summary>Changer mon mot de passe</summary>
       <form class="stack-form" data-password-form>
@@ -66,10 +79,10 @@
       </form>
     </details>
     <nav class="participant-tabbar" aria-label="Navigation de l’espace participant">
-      <a href="#home" data-account-tab="home">Accueil</a><a href="#dossiers" data-account-tab="dossiers">Dossiers</a><a href="#peloton" data-account-tab="peloton">Peloton</a><a href="#profile" data-account-tab="profile">Profil</a>
+      <a href="#home" data-account-tab="home">Accueil</a><a href="#dossiers" data-account-tab="dossiers">Dossiers</a><a href="#peloton" data-account-tab="peloton">Peloton</a><a href="#profile" data-account-tab="profile">Profil</a><a href="#team-duel" data-account-tab="team-duel">Ancien gros vs Ancien maigre</a>
     </nav>
   </div>
   <div class="error-state" data-account-error hidden><span aria-hidden="true">⚠</span><h2>Le casier est coincé.</h2><p>Recharge la page dans un instant.</p></div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='js/account.js') }}" defer></script><script src="{{ url_for('static', filename='js/peloton.js') }}" defer></script><script src="{{ url_for('static', filename='js/peloton_more.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/account.js') }}" defer></script><script src="{{ url_for('static', filename='js/peloton.js') }}" defer></script><script src="{{ url_for('static', filename='js/peloton_more.js') }}" defer></script><script src="{{ url_for('static', filename='js/team_duel.js') }}" defer></script>{% endblock %}

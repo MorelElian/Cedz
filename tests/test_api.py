@@ -126,6 +126,33 @@ def test_participant_account_leaves_pwa_install_prompt_to_chrome(client):
     assert b'beforeinstallprompt' not in client.get("/static/js/account.js").data
 
 
+def test_participant_account_renders_team_duel_tab_and_section(client):
+    participant = client.get("/api/participants").get_json()["participants"][0]
+    with sqlite3.connect(client.application.config["DATABASE"]) as db:
+        db.execute("INSERT INTO answer_sessions(id,participant_id,email,phone,status,started_at,created_at,updated_at) VALUES ('done-duel',?,'','','completed','now','now','now')", (participant["id"],))
+        db.commit()
+    authenticate_as(client, participant["id"])
+    page = client.get("/compte")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert 'href="#team-duel" data-account-tab="team-duel"' in html
+    assert 'data-account-view="team-duel"' in html
+    assert 'data-team-duel-app' in html
+    assert 'Anciens gros' in html and 'Anciens maigres' in html
+    assert '/static/js/team_duel.js' in html
+
+
+def test_participant_team_duel_static_assets_are_available(client):
+    script = client.get("/static/js/team_duel.js")
+    assert script.status_code == 200
+    source = script.get_data(as_text=True)
+    assert '/api/team-duel' in source
+    assert 'hashchange' in source
+    assert '<details' in source and '<summary' in source
+    assert '<svg' in source
+    assert 'team-duel' in client.get("/static/js/account.js").get_data(as_text=True)
+
+
 def test_public_participant_pages_expose_pwa_but_admin_does_not(client):
     login = client.get("/login")
     assert b'rel="manifest" href="/manifest.webmanifest"' in login.data
