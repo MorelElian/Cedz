@@ -61,6 +61,8 @@ QUESTIONNAIRE_TARGET_SIZE = 30
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PHONE_RE = re.compile(r"^\+?[0-9][0-9 .()\-]{6,24}$")
 REVELATION_STATUSES = {"candidate", "in_review", "rejected", "sent"}
+TEAM_DUEL_TEAMS = (("ancien_gros", "Anciens gros"), ("ancien_maigre", "Anciens maigres"))
+TEAM_DUEL_DISCIPLINES = (("swim", "Nage"), ("bike", "Vélo"), ("run", "Course"))
 INTRO_TONES = {"pique", "positif"}
 INTRO_PHRASE_CATALOG_VERSION = "2"
 LEGACY_INTRO_PHRASES = (
@@ -477,6 +479,8 @@ def init_db() -> None:
         _db().execute("ALTER TABLE participants ADD COLUMN height_cm INTEGER")
     if "weight_kg" not in participant_columns:
         _db().execute("ALTER TABLE participants ADD COLUMN weight_kg REAL")
+    if "team" not in participant_columns:
+        _db().execute("ALTER TABLE participants ADD COLUMN team TEXT")
     session_columns = {row["name"] for row in _db().execute("PRAGMA table_info(answer_sessions)")}
     if "feedback" not in session_columns:
         _db().execute("ALTER TABLE answer_sessions ADD COLUMN feedback TEXT")
@@ -1339,6 +1343,97 @@ def participant_payload(row: sqlite3.Row, private: bool = False) -> dict[str, An
         result.update(email=row["email"], phone=row["phone"], secretCode=row["secret_code"],
                       hasPassword=bool(row["password_hash"]))
     return result
+
+
+def build_team_duel_payload(participants, revelations, *, include_participants: bool = False) -> dict[str, Any]:
+    """Rebuild the duel from current memberships and revealed ranking positions.
+
+    Inputs are database rows (or equivalent mappings). No data is mutated or
+    persisted, so reassignment applies equally to current and historical views.
+    """
+    people = {row["id"]: {**participant_payload(row), "team": row["team"]} for row in participants}
+    teams = [{"id": team_id, "label": label,
+              "members": [person for person in people.values() if person["team"] == team_id]}
+             for team_id, label in TEAM_DUEL_TEAMS]
+    disciplines = []
+    for discipline_id, label in TEAM_DUEL_DISCIPLINES:
+        stats = {team_id: {"averagePosition": None, "stddev": None, "revealedCount": 0, "positions": []}
+                 for team_id, _ in TEAM_DUEL_TEAMS}
+        pending_count, revealed_count = 0, 0
+        weekly_positions: dict[Any, list[tuple[str, int]]] = {}
+        for row in revelations:
+            if row["question_type"] != "ranking":
+                continue
+            content = json.loads(row["content_json"])
+            if str(content.get("discipline", "")).strip().casefold() != label.casefold():
+                continue
+            if row["status"] in {"candidate", "in_review"}:
+                pending_count += 1
+                continue
+            if row["status"] != "sent":
+                continue
+            revealed_count += 1
+            person = people.get(row["recipient_participant_id"])
+            if not person or person["team"] not in stats:
+                continue
+            position = content["position"]
+            author = people[row["author_participant_id"]]
+            team_id = person["team"]
+            stats[team_id]["positions"].append({
+                "revelationId": row["id"],
+                "participant": {"id": person["id"], "displayName": person["displayName"]},
+                "author": {"id": author["id"], "displayName": author["displayName"]},
+                "position": position, "sentAt": row["sent_at"],
+            })
+            if row["sent_at"]:
+                sent_at = datetime.fromisoformat(row["sent_at"].replace("Z", "+00:00"))
+                if sent_at.tzinfo:
+                    sent_at = sent_at.astimezone(timezone.utc)
+                monday = sent_at.date() - timedelta(days=sent_at.weekday())
+                weekly_positions.setdefault(monday, []).append((team_id, position))
+
+        for team_stats in stats.values():
+            positions = [item["position"] for item in team_stats["positions"]]
+            if positions:
+                mean = sum(positions) / len(positions)
+                team_stats.update(averagePosition=mean, revealedCount=len(positions),
+                                  stddev=math.sqrt(sum((value - mean) ** 2 for value in positions) / len(positions)))
+
+        history = []
+        cumulative = {team_id: [] for team_id, _ in TEAM_DUEL_TEAMS}
+        if weekly_positions:
+            week, last_week = min(weekly_positions), max(weekly_positions)
+            while week <= last_week:
+                for team_id, position in weekly_positions.get(week, []):
+                    cumulative[team_id].append(position)
+                year, number, _ = week.isocalendar()
+                history.append({"week": f"{year}-W{number:02d}", "teams": {
+                    team_id: sum(values) / len(values) if values else None
+                    for team_id, values in cumulative.items()
+                }})
+                week += timedelta(weeks=1)
+
+        gros, maigre = (stats[team_id]["averagePosition"] for team_id, _ in TEAM_DUEL_TEAMS)
+        delta, winner = None, None
+        if gros is not None and maigre is not None:
+            delta = abs(gros - maigre)
+            winner = "tie" if gros == maigre else "ancien_gros" if gros < maigre else "ancien_maigre"
+        disciplines.append({"id": discipline_id, "label": label, "teams": stats,
+                            "revealedCount": revealed_count, "pendingCount": pending_count,
+                            "isComplete": pending_count == 0, "delta": delta,
+                            "winner": winner, "history": history})
+    payload = {"teams": teams, "disciplines": disciplines}
+    if include_participants:
+        payload["participants"] = list(people.values())
+    return payload
+
+
+def team_duel_payload(*, include_participants: bool = False) -> dict[str, Any]:
+    participants = _db().execute("SELECT * FROM participants ORDER BY display_name,id").fetchall()
+    revelations = _db().execute(
+        "SELECT * FROM revelations WHERE question_type='ranking' ORDER BY sent_at,id"
+    ).fetchall()
+    return build_team_duel_payload(participants, revelations, include_participants=include_participants)
 
 
 def question_payload(row: sqlite3.Row) -> dict[str, Any]:
@@ -2700,6 +2795,11 @@ def register_account_api(app: Flask) -> None:
             ranks.append({"discipline":discipline,"rank":rank,"averagePosition":average,"revealedCount":len(values_by_person.get(person_id, [])),"votes":votes})
         return {"participant":participant_payload(person),"rankings":ranks,"latestRevelations":latest_cards,"olderRevelations":cards[5:],"popularRevelations":popular_cards,"wallPosts":wall}
 
+    @app.get("/api/team-duel")
+    @participant_required
+    def participant_team_duel():
+        return jsonify(team_duel_payload())
+
     @app.get("/api/peloton")
     @participant_required
     def peloton_list():
@@ -3114,6 +3214,24 @@ def register_admin_api(app: Flask) -> None:
     @admin_required
     def admin_csrf():
         return jsonify({"csrfToken": csrf_token()})
+
+    @app.get("/api/admin/team-duel")
+    @admin_required
+    def admin_team_duel():
+        return jsonify(team_duel_payload(include_participants=True))
+
+    @app.patch("/api/admin/team-duel/participants/<int:participant_id>")
+    @admin_required
+    def admin_assign_team_duel_participant(participant_id: int):
+        if not _db().execute("SELECT 1 FROM participants WHERE id=?", (participant_id,)).fetchone():
+            abort_json(404, "Participant introuvable.")
+        data = json_body()
+        if "team" not in data or data["team"] not in (None, "ancien_gros", "ancien_maigre"):
+            abort_json(400, "Équipe invalide.")
+        _db().execute("UPDATE participants SET team=?,updated_at=? WHERE id=?",
+                      (data["team"], utcnow(), participant_id))
+        _db().commit()
+        return jsonify(team_duel_payload(include_participants=True))
 
     @app.get("/api/admin/participants")
     @admin_required

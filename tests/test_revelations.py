@@ -1276,3 +1276,158 @@ def test_intro_phrase_crud_requires_admin_csrf(client):
         json={"text": "Ça nage ?", "tone": "pique"}, headers=csrf,
     ).status_code == 200
     assert client.delete(f"/api/admin/intro-phrases/{phrase_id}", headers=csrf).status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/api/team-duel", "/api/admin/team-duel"])
+def test_team_duel_requires_authentication(client, path):
+    assert client.get(path).status_code == 401
+
+
+def test_team_duel_migrates_existing_participants_idempotently(app):
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(participants)")}
+        assert "team" in columns
+        assert db.execute("SELECT COUNT(*) FROM participants WHERE team IS NOT NULL").fetchone()[0] == 0
+        person_id = db.execute("SELECT MIN(id) FROM participants").fetchone()[0]
+        db.execute("UPDATE participants SET team='ancien_gros' WHERE id=?", (person_id,))
+        db.commit()
+    with app.app_context():
+        init_db()
+        init_db()
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        assert db.execute("SELECT team FROM participants WHERE id=?", (person_id,)).fetchone()[0] == "ancien_gros"
+
+
+def team_duel_fixture(client, app):
+    csrf = admin_login(client)
+    people = client.get("/api/admin/participants").get_json()["participants"]
+    first, second, third, unassigned = people[:4]
+    for person, team in [(first, "ancien_gros"), (second, "ancien_gros"), (third, "ancien_maigre")]:
+        response = client.patch(f"/api/admin/team-duel/participants/{person['id']}",
+                                json={"team": team}, headers=csrf)
+        assert response.status_code == 200
+    with sqlite3.connect(app.config["DATABASE"]) as db:
+        db.execute("UPDATE revelations SET status='rejected',sent_at=NULL")
+        rows = {}
+        for person in people[:4]:
+            rows[person["id"]] = iter(db.execute(
+                "SELECT id FROM revelations WHERE recipient_participant_id=? AND question_type='ranking' ORDER BY id",
+                (person["id"],),
+            ).fetchall())
+
+        def ranking(person, discipline, position, status, sent_at=None, question_type="ranking"):
+            revelation_id = next(rows[person["id"]])[0]
+            db.execute("UPDATE revelations SET question_type=?,content_json=?,status=?,sent_at=? WHERE id=?",
+                       (question_type, json.dumps({"discipline": discipline, "position": position}),
+                        status, sent_at, revelation_id))
+            return revelation_id
+
+        first_id = ranking(first, "nage", 1, "sent", "2025-12-29T10:00:00+00:00")
+        ranking(second, "nage", 5, "sent", "2026-01-19T10:00:00+00:00")
+        ranking(third, "nage", 2, "sent", "2026-01-05T10:00:00+00:00")
+        ranking(unassigned, "nage", 9, "sent", "2026-01-05T10:00:00+00:00")
+        ranking(first, "nage", 9, "candidate")
+        ranking(unassigned, "nage", 10, "in_review")
+        ranking(first, "nage", 10, "rejected")
+        ranking(first, "nage", 10, "sent", "2026-01-05T10:00:00+00:00", "slider")
+        ranking(first, "Vélo", 2, "sent", "2026-01-05T10:00:00+00:00")
+        ranking(third, "vélo", 2, "sent", "2026-01-05T10:00:00+00:00")
+        ranking(second, "vélo", 9, "candidate")
+        db.commit()
+    return csrf, people[:4], first_id
+
+
+def test_team_duel_rejects_invalid_assignments_and_protects_mutations(client, app):
+    csrf = admin_login(client)
+    person = client.get("/api/admin/participants").get_json()["participants"][0]
+    path = f"/api/admin/team-duel/participants/{person['id']}"
+    assert client.patch(path, json={"team": "ancien_gros"}).status_code == 403
+    for data in [{}, {"team": "other"}, {"team": ""}, {"team": []}, {"team": {}}, {"team": True}, {"team": 1}]:
+        assert client.patch(path, json=data, headers=csrf).status_code == 400
+    assert client.patch("/api/admin/team-duel/participants/999999", json={"team": None}, headers=csrf).status_code == 404
+    with client.session_transaction() as session:
+        session.pop("is_admin", None)
+        session["participant_id"] = person["id"]
+    assert client.get("/api/admin/team-duel").status_code == 401
+    assert client.patch(path, json={"team": "ancien_gros"}, headers=csrf).status_code == 401
+
+
+def test_team_duel_empty_teams_have_no_invented_statistics(client, app):
+    admin_login(client)
+    payload = client.get("/api/admin/team-duel").get_json()
+    assert payload is not None
+    assert all(person["team"] is None for person in payload["participants"])
+    assert all(team["members"] == [] for team in payload["teams"])
+    assert [discipline["id"] for discipline in payload["disciplines"]] == ["swim", "bike", "run"]
+    for discipline in payload["disciplines"]:
+        assert discipline["history"] == []
+        assert discipline["delta"] is None
+        assert discipline["winner"] is None
+        assert discipline["pendingCount"] > 0
+        assert discipline["isComplete"] is False
+        for stats in discipline["teams"].values():
+            assert stats == {"averagePosition": None, "stddev": None, "revealedCount": 0, "positions": []}
+
+
+def test_team_duel_uses_sent_rankings_and_population_standard_deviation(client, app):
+    _, people, first_id = team_duel_fixture(client, app)
+    payload = client.get("/api/admin/team-duel").get_json()
+    swim, bike, run = payload["disciplines"]
+    gros, maigre = swim["teams"]["ancien_gros"], swim["teams"]["ancien_maigre"]
+    assert (gros["averagePosition"], gros["stddev"], gros["revealedCount"]) == (3, 2, 2)
+    assert (maigre["averagePosition"], maigre["stddev"], maigre["revealedCount"]) == (2, 0, 1)
+    assert swim["delta"] == 1
+    assert swim["winner"] == "ancien_maigre"
+    assert swim["revealedCount"] == 4
+    assert swim["pendingCount"] == 2
+    assert swim["isComplete"] is False
+    position = next(position for position in gros["positions"] if position["revelationId"] == first_id)
+    assert position["position"] == 1
+    assert position["participant"]["id"] == people[0]["id"]
+    assert position["participant"]["displayName"] == people[0]["displayName"]
+    assert position["author"]["displayName"]
+    assert position["sentAt"] == "2025-12-29T10:00:00+00:00"
+    assert bike["delta"] == 0
+    assert bike["winner"] == "tie"
+    assert bike["pendingCount"] == 1
+    assert run["winner"] is None
+    assert run["revealedCount"] == 0
+    assert run["pendingCount"] == 0
+    assert run["isComplete"] is True
+    assert {person["id"] for person in payload["teams"][0]["members"]} == {people[0]["id"], people[1]["id"]}
+
+
+def test_team_duel_history_is_cumulative_in_iso_week_order(client, app):
+    team_duel_fixture(client, app)
+    swim = client.get("/api/admin/team-duel").get_json()["disciplines"][0]
+    assert swim["history"] == [
+        {"week": "2026-W01", "teams": {"ancien_gros": 1, "ancien_maigre": None}},
+        {"week": "2026-W02", "teams": {"ancien_gros": 1, "ancien_maigre": 2}},
+        {"week": "2026-W03", "teams": {"ancien_gros": 1, "ancien_maigre": 2}},
+        {"week": "2026-W04", "teams": {"ancien_gros": 3, "ancien_maigre": 2}},
+    ]
+
+
+def test_team_duel_reassignment_recalculates_current_and_historical_values(client, app):
+    csrf, people, _ = team_duel_fixture(client, app)
+    path = f"/api/admin/team-duel/participants/{people[1]['id']}"
+    response = client.patch(path, json={"team": "ancien_maigre"}, headers=csrf)
+    assert response.status_code == 200
+    swim = response.get_json()["disciplines"][0]
+    assert swim["teams"]["ancien_gros"]["averagePosition"] == 1
+    assert swim["teams"]["ancien_maigre"]["averagePosition"] == 3.5
+    assert swim["teams"]["ancien_maigre"]["stddev"] == 1.5
+    assert swim["winner"] == "ancien_gros"
+    assert swim["history"][-1]["teams"] == {"ancien_gros": 1, "ancien_maigre": 3.5}
+    response = client.patch(path, json={"team": None}, headers=csrf)
+    assert response.status_code == 200
+    assert response.get_json()["disciplines"][0]["teams"]["ancien_maigre"]["averagePosition"] == 2
+    with client.session_transaction() as session:
+        session.pop("is_admin", None)
+        session["participant_id"] = people[0]["id"]
+    public = client.get("/api/team-duel")
+    assert public.status_code == 200
+    assert "participants" not in public.get_json()
+    for team in public.get_json()["teams"]:
+        assert all("email" not in person and "secretCode" not in person for person in team["members"])
+    assert public.get_json()["disciplines"] == response.get_json()["disciplines"]
