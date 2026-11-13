@@ -168,6 +168,20 @@ def test_admin_import_script_announces_details_and_refreshes_dependents(client):
     assert "cedz:answers-imported" in dashboard
 
 
+def test_admin_renders_team_duel_assignment_panel(client):
+    login_admin(client)
+    page = client.get("/admin")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert 'data-tab="team-duel"' in html
+    assert 'data-panel="team-duel" hidden' in html
+    assert 'data-admin-team-duel' in html
+    assert 'data-admin-team-duel-assignments' in html
+    assert 'data-admin-team-duel-summary' in html
+    assert 'Ancien gros vs Ancien maigre' in html
+    assert '/static/js/admin_team_duel.js' in html
+
+
 def valid_answer(question, participant_ids):
     question_type = question["type"]
     if question_type in {"free_text", "single_person_answer"}:

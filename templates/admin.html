@@ -16,6 +16,7 @@
   <nav class="admin-tabs" aria-label="Sections d'administration" data-tabs>
     <button type="button" aria-selected="true" data-tab="overview">Vue d'ensemble</button>
     <button type="button" aria-selected="false" data-tab="participants">Participants</button>
+    <button type="button" aria-selected="false" data-tab="team-duel">Ancien gros vs Ancien maigre</button>
     <button type="button" aria-selected="false" data-tab="questions">Questions</button>
     <button type="button" aria-selected="false" data-tab="suggestions">Suggestions</button>
     <button type="button" aria-selected="false" data-tab="daily">Questions bonus</button>
@@ -83,6 +84,19 @@
     </div>
     <div class="admin-card table-wrap">
       <table><thead><tr><th>Participant</th><th>Contact</th><th>Statut</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody data-participant-table><tr><td colspan="4" class="loading-row">Chargement…</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section class="admin-panel" data-panel="team-duel" hidden data-admin-team-duel>
+    <div class="panel-toolbar">
+      <div><h2>Ancien gros vs Ancien maigre</h2><p>Affecte chaque participant à un camp. Les moyennes et l’historique sont recalculés immédiatement.</p></div>
+      <button class="button button-secondary button-small" type="button" data-admin-team-duel-reload>Recharger</button>
+    </div>
+    <p class="form-note" role="status" aria-live="polite" data-admin-team-duel-status>Ouvre cet onglet pour charger le duel.</p>
+    <p class="form-error" role="alert" data-admin-team-duel-error hidden></p>
+    <div class="admin-team-duel-layout">
+      <section class="admin-card"><h3>Affectation des participants</h3><div data-admin-team-duel-assignments></div></section>
+      <section class="admin-card"><h3>Résumé du duel</h3><p class="admin-team-duel-note">Une position moyenne plus petite est meilleure. Seuls les classements révélés comptent.</p><div data-admin-team-duel-summary></div></section>
     </div>
   </section>
 
@@ -213,4 +227,4 @@
 </dialog>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily_mail.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_push.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_inventory.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_revelations.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_daily_mail.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_push.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_inventory.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin_team_duel.js') }}" defer></script>{% endblock %}
